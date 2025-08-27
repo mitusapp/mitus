@@ -5,20 +5,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (handleOptions(req, res)) return
   allowCors(res)
 
-  if (req.method !== 'GET') {
-    return res.status(405).send('Method Not Allowed')
-  }
+  if (req.method !== 'GET') return res.status(405).send('Method Not Allowed')
 
   const tokenQ = (req.query.token ?? '') as string
 
   try {
     const svc = getClientAsService()
 
-    // Helper: ordenar partes por "order"
-    const sortParts = (parts: any[] = []) =>
-      parts.sort((a: any, b: any) => (a?.order ?? 0) - (b?.order ?? 0))
+    const normalize = (parts: any[] = []) =>
+      parts
+        .map(p => ({
+          ...p,
+          // alias para compatibilidad si el front espera "place" u "order"
+          place: p.place ?? p.place_name ?? null,
+          order: p.order ?? p.sort_order ?? 0,
+        }))
+        .sort((a: any, b: any) => (a.sort_order ?? a.order ?? 0) - (b.sort_order ?? b.order ?? 0))
 
-    // 1) Si viene token, úsalo
+    // 1) Con token explícito
     if (tokenQ) {
       const { data, error } = await svc
         .from('invitations')
@@ -28,13 +32,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .single()
 
       if (error) return res.status(404).json({ error: error.message })
-      return res
-        .status(200)
-        .json({ ...data, parts: sortParts(data?.parts) })
+      return res.status(200).json({ ...data, parts: normalize(data?.parts) })
     }
 
-    // 2) Fallback: tomar el borrador trial más reciente (user_id IS NULL)
-    const { data: draft, error: dErr } = await svc
+    // 2) Fallback: último borrador trial (user_id IS NULL)
+    const { data: draft } = await svc
       .from('invitations')
       .select('*, parts:invitation_parts(*)')
       .is('user_id', null)
@@ -43,9 +45,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .limit(1)
       .maybeSingle()
 
-    if (!draft && dErr) {
-      // 3) Si tampoco existe, auto-crear uno
-      const newToken = crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)
+    if (!draft) {
+      // 3) Crear uno nuevo si no existe ninguno
+      const newToken = (globalThis as any).crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
       const { data: created, error: cErr } = await svc
         .from('invitations')
         .insert({
@@ -53,17 +55,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           event_type: 'wedding',
           language: 'es',
           is_trial: true,
-          trial_token: newToken
+          trial_token: newToken,
+          status: 'draft',
         })
         .select('*, parts:invitation_parts(*)')
         .single()
-
       if (cErr) return res.status(500).json({ error: cErr.message })
       return res.status(200).json({ ...created, parts: [] })
     }
 
-    // Draft encontrado
-    return res.status(200).json({ ...draft, parts: sortParts(draft?.parts) })
+    return res.status(200).json({ ...draft, parts: normalize(draft?.parts) })
   } catch (err: any) {
     return res.status(500).json({ error: String(err?.message || err) })
   }
