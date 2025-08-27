@@ -36,13 +36,29 @@ export default function Wizard() {
     if (!inv) return
     setSaving(true)
     const data = { ...inv, ...(partial||{}) }
-    const res = await api('/api/trial/save', { method: 'PATCH', body: JSON.stringify(data) }).finally(()=>setSaving(false))
+
+    const token = localStorage.getItem('trial_token') || ''
+    const url = '/api/trial/save' + (token ? `?token=${encodeURIComponent(token)}` : '')
+
+    const res = await api(url, {
+      method: 'PATCH',
+      // Enviamos explícitamente el token por header para que el backend lo resuelva siempre
+      headers: token ? { 'X-Trial-Token': token } : undefined,
+      body: JSON.stringify(data)
+    }).finally(()=>setSaving(false))
+
     setInv(res)
   }
 
   const addPart = () => {
     const order = inv?.parts?.length || 0
-    setInv(prev => ({ ...(prev as any), parts: [ ...(prev?.parts||[]), { type: 'ceremony', date: '2025-12-31', time: '15:00', place_name: 'Lugar', address: 'Dirección', order } ] }))
+    setInv(prev => ({
+      ...(prev as any),
+      parts: [
+        ...(prev?.parts || []),
+        { type: 'ceremony', date: '2025-12-31', time: '15:00', place_name: 'Lugar', address: 'Dirección', order }
+      ]
+    }))
   }
 
   const preview = () => {
