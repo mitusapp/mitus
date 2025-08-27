@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getClientFromRequest, allowCors, handleOptions } from '../_shared/supabase'
+import { getClientFromRequest, allowCors, handleOptions } from '../_shared/supabase.js'
 import { randomUUID } from 'crypto'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

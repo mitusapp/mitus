@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { allowCors, handleOptions } from '../_shared/supabase'
+import { allowCors, handleOptions } from '../_shared/supabase.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (handleOptions(req, res)) return

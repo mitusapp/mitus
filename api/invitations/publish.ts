@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getClientFromRequest, getClientAsService, allowCors, handleOptions } from '../_shared/supabase'
+import { getClientFromRequest, getClientAsService, allowCors, handleOptions } from '../_shared/supabase.js'
 import bcrypt from 'bcryptjs'
 
 function slugify(s: string) {
