@@ -6,11 +6,13 @@ export default defineConfig({
   server: {
     port: 4028,
     proxy: {
+      // Cuando uses `vercel dev`, las serverless functions viven en :3000.
       '/api': {
-        target: 'http://localhost:4029',
+        target: 'http://localhost:3000',
         changeOrigin: true
       }
     }
   },
-  build: { outDir: 'build' }
+  // Vercel espera `dist` como directorio de salida del build de Vite
+  build: { outDir: 'dist' }
 })
