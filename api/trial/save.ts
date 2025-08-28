@@ -1,3 +1,4 @@
+// api/trial/save.ts
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getClientAsService, allowCors, handleOptions } from '../_shared/supabase.js'
 
@@ -7,70 +8,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== 'PATCH') return res.status(405).send('Method Not Allowed')
 
-  // 1) Token: querystring o header X-Trial-Token
+  // 1) Token OBLIGATORIO: header X-Trial-Token o query ?token=
   const tokenQ = (req.query.token ?? '') as string
-  const tokenH = (req.headers['x-trial-token'] ?? req.headers['X-Trial-Token'] ?? '') as string
-  let incomingToken = String(tokenQ || tokenH || '').trim()
+  const tokenH = (req.headers['x-trial-token'] ?? '') as string // headers vienen en minúsculas
+  const token = String(tokenQ || tokenH || '').trim()
+  if (!token) {
+    return res.status(400).json({ error: 'Missing X-Trial-Token' })
+  }
 
   try {
     const svc = getClientAsService()
     const body = (req.body || {}) as any
 
-    // 2) Resolver invitación trial destino
-    let invitationId: string | null = null
-    let token: string | null = incomingToken || null
+    // 2) Resolver invitación trial destino SOLO por token (sin fallbacks)
+    const { data: inv, error: invErr } = await svc
+      .from('invitations')
+      .select('id, trial_token')
+      .eq('trial_token', token)
+      .eq('is_trial', true)
+      .single()
 
-    if (token) {
-      const { data: inv, error: invErr } = await svc
-        .from('invitations')
-        .select('id, trial_token')
-        .eq('trial_token', token)
-        .eq('is_trial', true)
-        .single()
-
-      if (invErr) return res.status(404).json({ error: invErr.message })
-      invitationId = inv.id
-      token = inv.trial_token
-    } else {
-      // Si no llega token, reutilizamos el último borrador trial sin usuario; si no existe, creamos uno
-      const { data: draft, error: draftErr } = await svc
-        .from('invitations')
-        .select('id, trial_token')
-        .is('user_id', null)
-        .eq('is_trial', true)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (draftErr) return res.status(500).json({ error: draftErr.message })
-
-      if (draft) {
-        invitationId = draft.id
-        token = draft.trial_token
-      } else {
-        const newToken =
-          (globalThis as any).crypto?.randomUUID?.() ??
-          Math.random().toString(36).slice(2)
-
-        const { data: created, error: cErr } = await svc
-          .from('invitations')
-          .insert({
-            title: body.title ?? 'Mi Evento',
-            event_type: body.event_type ?? 'wedding',
-            language: body.language ?? 'es',
-            is_trial: true,
-            trial_token: newToken,
-            status: 'draft',
-          })
-          .select('id, trial_token')
-          .single()
-
-        if (cErr) return res.status(500).json({ error: cErr.message })
-
-        invitationId = created.id
-        token = created.trial_token
-      }
-    }
+    if (invErr || !inv) return res.status(404).json({ error: invErr?.message || 'Trial not found' })
+    const invitationId = inv.id
 
     // 3) Actualizar cabecera SOLO con campos existentes
     const fields: Record<string, any> = {}
@@ -85,25 +44,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error: upErr } = await svc
         .from('invitations')
         .update(fields)
-        .eq('id', invitationId!)
+        .eq('id', invitationId)
         .eq('is_trial', true)
 
       if (upErr) return res.status(400).json({ error: upErr.message })
     }
 
-    // 4) Reemplazar parts (alineado a place_name y sort_order; NO inventamos campos)
+    // 4) Reemplazar parts (alineado a place_name y sort_order)
     if (Array.isArray(body.parts)) {
       const { error: delErr } = await svc
         .from('invitation_parts')
         .delete()
-        .eq('invitation_id', invitationId!)
+        .eq('invitation_id', invitationId)
       if (delErr) return res.status(400).json({ error: delErr.message })
 
       const partsToInsert = body.parts.map((p: any, idx: number) => ({
         type: p.type ?? null,
         date: p.date ?? null,
         time: p.time ?? null,
-        place_name: p.place_name ?? p.place ?? null, // usar place_name del esquema
+        place_name: p.place_name ?? p.place ?? null,
         address: p.address ?? null,
         notes: p.notes ?? null,
         lat: p.lat ?? null,
@@ -113,7 +72,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : Number.isInteger(p.order)
           ? p.order
           : idx,
-        invitation_id: invitationId!,
+        invitation_id: invitationId,
       }))
 
       const { error: insErr } = await svc
@@ -126,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data, error } = await svc
       .from('invitations')
       .select('*, parts:invitation_parts(*)')
-      .eq('id', invitationId!)
+      .eq('id', invitationId)
       .single()
 
     if (error) return res.status(400).json({ error: error.message })
@@ -134,8 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const parts = (data?.parts || [])
       .map((p: any) => ({
         ...p,
-        // Alias amigables para el front (no escribimos estas columnas)
-        place: p.place ?? p.place_name ?? null,
+        place: p.place ?? p.place_name ?? null, // alias solo en la respuesta
         order: p.order ?? p.sort_order ?? 0,
       }))
       .sort(
