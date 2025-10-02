@@ -1,0 +1,421 @@
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeft, ArrowRight, ChevronDown, Download, Pause, Play, Share2, X,
+  Image as ImageIcon, Video as VideoIcon, KeyRound
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/customSupabaseClient';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
+import LoadingSpinner from '@/components/LoadingSpinner';
+
+const useCategories = (uploads) => useMemo(() => {
+  const set = new Set();
+  uploads.forEach(u => set.add((u.category || 'Highlights').trim()));
+  return Array.from(set);
+}, [uploads]);
+
+const isLandscapeViewport = () => window.innerWidth >= window.innerHeight;
+
+const pickCoverFromUploads = (uploads, wantLandscape) => {
+  if (!uploads?.length) return null;
+  const imgs = uploads.filter(u => u.type !== 'video');
+  if (!imgs.length) return uploads[0]?.file_url || null;
+
+  const byOrientation = imgs.find(u => {
+    const w = u?.metadata?.width, h = u?.metadata?.height;
+    if (!w || !h) return false;
+    return wantLandscape ? w >= h : h > w;
+  });
+
+  return byOrientation?.file_url || imgs[0]?.file_url || null;
+};
+
+const getInitials = (name) => {
+  if (!name) return '?';
+  const parts = name.split(/&|y/i).map(p => p.trim()).filter(Boolean);
+  if (parts.length > 1) return `${parts[0][0]} & ${parts[1][0]}`.toUpperCase();
+  return name[0].toUpperCase();
+};
+
+const EventGallery = () => {
+  const { eventId } = useParams();
+  const navigate = useNavigate();
+
+  const [event, setEvent] = useState(null);
+  const [uploads, setUploads] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const [activeCategory, setActiveCategory] = useState('Highlights');
+  const [selectedMediaIndex, setSelectedMediaIndex] = useState(null);
+  const [isSlideshow, setIsSlideshow] = useState(false);
+
+  const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
+  const [downloadCode, setDownloadCode] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const [coverUrl, setCoverUrl] = useState(null);
+
+  const fetchEventData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('id, title, date, cover_image_url, settings, invitation_details')
+        .eq('id', eventId)
+        .single();
+
+      if (eventError || !eventData) {
+        toast({ title: 'Evento no encontrado', variant: 'destructive' });
+        navigate('/');
+        return;
+      }
+      setEvent(eventData);
+
+      const { data: uploadsData, error: uploadsError } = await supabase
+        .from('uploads')
+        .select('*, metadata:file_url->metadata')
+        .eq('event_id', eventId)
+        .order('uploaded_at', { ascending: true });
+
+      if (uploadsError) throw uploadsError;
+      
+      setUploads(uploadsData || []);
+    } catch (error) {
+      console.error('Error fetching gallery data:', error);
+      toast({
+        title: 'Error al cargar la galería',
+        description: error.message,
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [eventId, navigate]);
+
+  useEffect(() => { fetchEventData(); }, [fetchEventData]);
+
+  const updateCover = useCallback(() => {
+    const wantLandscape = isLandscapeViewport();
+    const chosen = pickCoverFromUploads(uploads, wantLandscape);
+    setCoverUrl(chosen || event?.cover_image_url || 'https://images.unsplash.com/photo-1509930854872-0f61005b282e');
+  }, [uploads, event?.cover_image_url]);
+
+  useEffect(() => { updateCover(); }, [updateCover]);
+
+  useEffect(() => {
+    const onResize = () => updateCover();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, [updateCover]);
+
+  const categories = useCategories(uploads);
+  useEffect(() => {
+    if (categories.length && !categories.includes(activeCategory)) {
+      setActiveCategory(categories[0]);
+    }
+  }, [categories, activeCategory]);
+
+  const filteredUploads = useMemo(
+    () => uploads.filter(u => (u.category || 'Highlights') === activeCategory),
+    [uploads, activeCategory]
+  );
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    toast({ title: 'Enlace copiado al portapapeles' });
+  };
+
+  const openSlideshow = () => {
+    if (filteredUploads.length === 0) {
+      toast({ title: 'Galería vacía', description: 'No hay imágenes para el slideshow.' });
+      return;
+    }
+    setSelectedMediaIndex(0);
+    setIsSlideshow(true);
+  };
+
+  const handleDownloadRequest = () => {
+    if (!event?.settings?.downloadCode) {
+      toast({
+        title: 'Descarga no habilitada',
+        description: 'El anfitrión no ha configurado un código de descarga.',
+        variant: 'destructive'
+      });
+      return;
+    }
+    setIsDownloadModalOpen(true);
+  };
+
+  const handleConfirmDownload = async () => {
+    if (isDownloading) return;
+
+    if (downloadCode !== event.settings.downloadCode) {
+      toast({ title: 'Código incorrecto', variant: 'destructive' });
+      return;
+    }
+    if (event.settings.downloadLimit <= 0) {
+      toast({ title: 'Límite de descargas alcanzado', variant: 'destructive' });
+      return;
+    }
+
+    setIsDownloading(true);
+    toast({ title: 'Preparando descarga...', description: 'Esto puede tardar unos minutos.' });
+
+    const zip = new JSZip();
+    for (const upload of uploads) {
+      try {
+        const response = await fetch(upload.file_url);
+        const blob = await response.blob();
+        zip.file(upload.file_name || `${upload.id}`, blob);
+      } catch (e) {
+        console.error(`Failed to fetch ${upload.file_url}`, e);
+      }
+    }
+
+    zip.generateAsync({ type: 'blob' }).then(async (content) => {
+      saveAs(content, `mitus-galeria-${eventId}.zip`);
+      toast({ title: '¡Descarga completa!', description: 'Tu archivo ZIP está listo.' });
+
+      const newLimit = event.settings.downloadLimit - 1;
+      const { error } = await supabase
+        .from('events')
+        .update({ settings: { ...event.settings, downloadLimit: newLimit } })
+        .eq('id', eventId);
+      if (error) console.error('Error updating download limit:', error);
+
+      setIsDownloadModalOpen(false);
+      setIsDownloading(false);
+      setDownloadCode('');
+    });
+  };
+
+  const eventDate = event ? new Date(event.date?.replace(/-/g, '/')) : null;
+  const hostsText = event?.invitation_details?.hosts?.join(' & ') || event?.title || '';
+  const initials = getInitials(hostsText);
+
+  if (loading) {
+    return <LoadingSpinner />;
+  }
+
+  return (
+    <div className="bg-white text-[#1E1E1E] min-h-screen">
+      <style>
+        {`
+          @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@600;700&family=Lato:wght@300;400;500&display=swap');
+          .font-raleway{font-family:'Raleway',sans-serif;}
+          .font-lato{font-family:'Lato',sans-serif;}
+          .masonry { column-count: 2; column-gap: 8px; }
+          .masonry-item { break-inside: avoid; margin-bottom: 8px; }
+          @media (min-width: 1024px) { .masonry { column-count: 4; column-gap: 12px; } .masonry-item { margin-bottom: 12px; } }
+          .hero-grid { display: grid; grid-template-rows: 1fr auto; height: 100vh; }
+          .hero-bg { position: relative; overflow: hidden; }
+          .hero-bg img { width: 100%; height: 100%; object-fit: cover; filter: blur(2px); transform: scale(1.05); }
+          .hero-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
+          .initials-circle { width: clamp(120px, 22vw, 200px); height: clamp(120px, 22vw, 200px); border-radius: 9999px; display: flex; align-items: center; justify-content: center; background: transparent; backdrop-filter: none; border: 3px solid rgba(255,255,255,.55); box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+          .initials-circle span{ font-family: 'Lato', sans-serif; font-weight: 800; font-size: clamp(28px, 6vw, 48px); color: #fff; letter-spacing: .04em; white-space: nowrap; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
+          .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
+        `}
+      </style>
+
+      <section className="hero-grid">
+        <div className="hero-bg">
+          <img src={coverUrl} alt="Portada del evento" />
+          <div className="hero-overlay" />
+          {hostsText && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none" aria-label={`Iniciales de ${hostsText}`}>
+              <div className="initials-circle font-lato">
+                <span>{initials}</span>
+              </div>
+            </div>
+          )}
+          <div className="absolute z-10 bottom-6 left-0 right-0 flex justify-center">
+            <Button onClick={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white/20 hover:bg-white/30 border border-white/40 text-white rounded-full px-6 py-5">
+              Ver galería <ChevronDown className="w-5 h-5 ml-2" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="z-20 bg-white/85 backdrop-blur border-t border-black/10">
+          <div className="max-w-[1400px] mx-auto px-4">
+            <div className="flex items-center justify-between py-4">
+              <div className="text-left">
+                <div className="flex items-baseline gap-3">
+                  <span className="font-raleway text-xl md:text-2xl">
+                    {event?.invitation_details?.hosts?.join(' & ') || event?.title}
+                  </span>
+                </div>
+                {eventDate && (
+                  <div className="pt-1 text-xs md:text-sm text-black/60">
+                    {event?.title} — {eventDate.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </div>
+                )}
+              </div>
+              <nav className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={handleDownloadRequest}>
+                  <Download className="w-5 h-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={handleShare}>
+                  <Share2 className="w-5 h-5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={openSlideshow}>
+                  <Play className="w-5 h-5" />
+                </Button>
+              </nav>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10">
+        <div className="max-w-[1400px] mx-auto px-4">
+          <div className="w-full overflow-x-auto">
+            <ul className="flex gap-6 text-sm md:text-base font-lato">
+              {categories.map(cat => (
+                <li key={cat}>
+                  <button onClick={() => setActiveCategory(cat)} className={`relative py-3 inline-block ${cat === activeCategory ? 'text-black' : 'text-black/60 hover:text-black'}`}>
+                    {cat}
+                    <span className={`absolute left-0 right-0 bottom-0 h-[2px] ${cat === activeCategory ? 'bg-black' : 'bg-transparent'}`} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <div id="gallery-start" />
+      <main>
+        <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10">
+          <div className="masonry">
+            {filteredUploads.map((upload, idx) => (
+              <motion.div
+                key={upload.id}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.35 }}
+                className="masonry-item cursor-pointer"
+                onClick={() => setSelectedMediaIndex(idx)}
+                title={upload.title || ''}
+              >
+                {upload.type === 'video'
+                  ? (
+                    <div className="relative bg-black">
+                      <video src={upload.file_url} className="w-full h-auto" playsInline muted />
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <VideoIcon className="w-10 h-10 text-white/90" />
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <img src={upload.file_url} alt={upload.title || 'Foto del evento'} className="w-full h-auto select-none" loading="lazy" />
+                  )}
+              </motion.div>
+            ))}
+          </div>
+          {filteredUploads.length === 0 && (
+            <div className="text-center py-20">
+              <ImageIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-2xl font-semibold">Galería vacía</h3>
+              <p className="text-gray-600 mt-2">No hay fotos o videos en esta categoría.</p>
+            </div>
+          )}
+        </section>
+      </main>
+
+      <footer className="text-center py-10 border-t border-black/5">
+        <p className="text-xs text-black/60">Powered by Mitus</p>
+      </footer>
+
+      <AnimatePresence>
+        {selectedMediaIndex !== null && (
+          <MediaViewer
+            event={event}
+            uploads={filteredUploads}
+            startIndex={selectedMediaIndex}
+            onClose={() => { setSelectedMediaIndex(null); setIsSlideshow(false); }}
+            isSlideshow={isSlideshow}
+            setIsSlideshow={setIsSlideshow}
+          />
+        )}
+      </AnimatePresence>
+
+      <Dialog open={isDownloadModalOpen} onOpenChange={setIsDownloadModalOpen}>
+        <DialogContent className="sm:max-w-[425px] bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center"><KeyRound className="w-5 h-5 mr-2 text-black" /> Descargar galería completa</DialogTitle>
+            <DialogDescription>Ingresa el código de descarga proporcionado por el anfitrión para descargar todos los archivos en un solo ZIP.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="download-code" className="text-right">Código</Label>
+              <input id="download-code" value={downloadCode} onChange={(e) => setDownloadCode(e.target.value)} className="col-span-3 p-2 border rounded-md" placeholder="XXXXXX" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={handleConfirmDownload} disabled={isDownloading} className="bg-black text-white hover:bg-black/80">{isDownloading ? 'Descargando...' : 'Confirmar y descargar'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSlideshow }) => {
+  const [currentIndex, setCurrentIndex] = useState(startIndex);
+  const [isPlaying, setIsPlaying] = useState(isSlideshow);
+
+  const goToNext = useCallback(() => setCurrentIndex(prev => (prev + 1) % uploads.length), [uploads.length]);
+  const goToPrev = useCallback(() => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length), [uploads.length]);
+
+  useEffect(() => {
+    let slideshowInterval;
+    if (isPlaying && isSlideshow) slideshowInterval = setInterval(goToNext, 3000);
+    return () => clearInterval(slideshowInterval);
+  }, [isPlaying, isSlideshow, goToNext]);
+
+  const currentMedia = uploads[currentIndex];
+  if (!currentMedia) return null;
+
+  const handleDownload = (e) => {
+    e.stopPropagation();
+    if (!event?.settings?.allowDownloads) {
+      toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
+      return;
+    }
+    window.open(currentMedia.file_url, '_blank');
+  };
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center" onClick={onClose}>
+      <div className="absolute top-0 right-0 p-4 flex items-center gap-2 z-10">
+        {isSlideshow && <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying); }}>{isPlaying ? <Pause /> : <Play />}</Button>}
+        {event?.settings?.allowDownloads && <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={handleDownload}><Download /></Button>}
+        <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={(e) => { e.stopPropagation(); onClose(); }}><X /></Button>
+      </div>
+      <div className="relative w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <Button variant="ghost" size="icon" className="absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12" onClick={goToPrev}><ArrowLeft /></Button>
+        <AnimatePresence mode="wait">
+          <motion.div key={currentIndex} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.25 }} className="flex items-center justify-center">
+            {currentMedia.type === 'video' ? <video src={currentMedia.file_url} controls autoPlay className="lightbox-media" /> : <img src={currentMedia.file_url} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" />}
+          </motion.div>
+        </AnimatePresence>
+        <Button variant="ghost" size="icon" className="absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12" onClick={goToNext}><ArrowRight /></Button>
+      </div>
+    </motion.div>
+  );
+};
+
+export default EventGallery;
