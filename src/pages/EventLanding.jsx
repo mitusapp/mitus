@@ -55,15 +55,14 @@ const EventLanding = () => {
   }, [eventId, navigate]);
 
   useEffect(() => {
-    fetchEventData();
-    const storedGuestName = sessionStorage.getItem('guestName');
-    if (storedGuestName) {
-      setGuestName(storedGuestName);
-      if (actionParam) {
-        navigate(`/event/${eventId}/${actionParam}`, { replace: true });
-      }
-    }
-  }, [fetchEventData, eventId, navigate, actionParam]);
+  fetchEventData();
+  const storedGuestName = sessionStorage.getItem('guestName');
+  if (storedGuestName) {
+    setGuestName(storedGuestName);
+  }
+  // ❌ sin redirección aquí: siempre se queda en la landing
+}, [fetchEventData]);
+
 
   const handleGuestAccess = (action) => {
     // Nombre opcional → solo guardar si el usuario lo escribió
