@@ -7,3 +7,4 @@ dist/
 # Variables de entorno
 .env
 .env.*
+.vercel
