@@ -18,13 +18,16 @@ import { saveAs } from 'file-saver';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 const DEFAULT_CATEGORY = 'Más momentos';
-
-// Categorías únicas, ordenadas alfabéticamente (normalizando a DEFAULT_CATEGORY)
-const useCategories = (uploads) => useMemo(() => {
-  const set = new Set();
-  uploads.forEach(u => set.add(((u.category || DEFAULT_CATEGORY) + '').trim()));
-  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-}, [uploads]);
+const CATEGORY_ORDER = [
+  'Preparación',
+  'Ceremonia',
+  'Retratos',
+  'Protocolo',
+  'Familia & Amigos',
+  'Recepción',
+  'Fiesta',
+  'Detalles & Decoración',
+];
 
 const isLandscapeViewport = () => window.innerWidth >= window.innerHeight;
 
@@ -44,7 +47,20 @@ const loadImageSize = (src) =>
     img.src = src;
   });
 
-const slugCat = (s) => (s || DEFAULT_CATEGORY).toLowerCase().replace(/[^a-z0-9]+/gi, '-');
+const normalizeCategory = (u) => (u.category || DEFAULT_CATEGORY).trim();
+const slug = (t) => t.toLowerCase().replace(/[^a-z0-9áéíóúñü\s-]/gi, '').replace(/\s+/g, '-');
+
+// Derivar categorías presentes, respetando el orden solicitado; extras alfabéticas y "Más momentos" al final.
+const useOrderedCategories = (uploads) => useMemo(() => {
+  const present = new Set();
+  uploads.forEach(u => present.add(normalizeCategory(u)));
+
+  const inOrder = CATEGORY_ORDER.filter(c => present.has(c));
+  const extras = Array.from(present).filter(c => !CATEGORY_ORDER.includes(c) && c !== DEFAULT_CATEGORY)
+    .sort((a,b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  const tail = present.has(DEFAULT_CATEGORY) ? [DEFAULT_CATEGORY] : [];
+  return [...inOrder, ...extras, ...tail];
+}, [uploads]);
 
 const EventGallery = () => {
   const { eventId } = useParams();
@@ -54,7 +70,6 @@ const EventGallery = () => {
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // La barra de categorías es navegación, no filtro.
   const [activeCategory, setActiveCategory] = useState(DEFAULT_CATEGORY);
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(null);
   const [isSlideshow, setIsSlideshow] = useState(false);
@@ -69,6 +84,9 @@ const EventGallery = () => {
   // Sticky shadow para la barra de categorías
   const [stickyShadow, setStickyShadow] = useState(false);
   const stickySentinelRef = useRef(null);
+
+  // Ref para anclas por categoría
+  const anchorRefs = useRef({});
 
   // Referencia para devolver el foco al cerrar el visor
   const lastActiveElRef = useRef(null);
@@ -98,12 +116,7 @@ const EventGallery = () => {
 
       if (uploadsError) throw uploadsError;
 
-      // Normaliza categoría y asegura valor por defecto; dejamos el resto TAL CUAL
-      const normalized = (uploadsData || []).map(u => ({
-        ...u,
-        category: ((u.category || DEFAULT_CATEGORY) + '').trim(),
-      }));
-      setUploads(normalized);
+      setUploads((uploadsData || []).map(u => ({ ...u, _cat: normalizeCategory(u) })));
     } catch (error) {
       console.error('Error fetching gallery data:', error);
       toast({
@@ -118,6 +131,27 @@ const EventGallery = () => {
 
   useEffect(() => { fetchEventData(); }, [fetchEventData]);
 
+  // Ordenación total: por categoría (orden fijo), luego por uploaded_at, y por id como respaldo
+  const sortedUploads = useMemo(() => {
+    const orderIndex = (cat) => {
+      const i = CATEGORY_ORDER.indexOf(cat);
+      if (i !== -1) return i; // categorías conocidas en orden
+      if (cat === DEFAULT_CATEGORY) return 10_000; // al final
+      return 9_000 + cat.localeCompare('zzzz', 'es'); // extras antes de "Más momentos"
+    };
+    const toTime = (u) => {
+      const t = u.uploaded_at || u.created_at || null;
+      return t ? new Date(t).getTime() : 0;
+    };
+    return [...uploads].sort((a, b) => {
+      const ca = orderIndex(a._cat), cb = orderIndex(b._cat);
+      if (ca !== cb) return ca - cb;
+      const ta = toTime(a), tb = toTime(b);
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }, [uploads]);
+
   // Selección de portada mejorada por orientación (no bloqueante)
   const pickCoverAsync = useCallback(async (allUploads) => {
     if (!allUploads?.length) return event?.cover_image_url || null;
@@ -129,7 +163,7 @@ const EventGallery = () => {
 
     for (let i = 0; i < Math.min(candidates.length, 12); i++) {
       const u = candidates[i];
-      const src = u.file_url;
+      const src = (u.web_url || u.file_url);
       const size = await loadImageSize(src);
       if (size && size.w && size.h) {
         const isLandscape = size.w >= size.h;
@@ -138,17 +172,17 @@ const EventGallery = () => {
         }
       }
     }
-    return images[0]?.file_url || event?.cover_image_url || candidates[0]?.file_url || null;
+    return (images[0]?.web_url || images[0]?.file_url || event?.cover_image_url || candidates[0]?.web_url || candidates[0]?.file_url || null);
   }, [event?.cover_image_url]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const chosen = await pickCoverAsync(uploads);
-      if (!cancelled) setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D');
+      const chosen = await pickCoverAsync(sortedUploads);
+      if (!cancelled) setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0');
     })();
     return () => { cancelled = true; };
-  }, [uploads, pickCoverAsync]);
+  }, [sortedUploads, pickCoverAsync]);
 
   // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
@@ -162,65 +196,27 @@ const EventGallery = () => {
     return () => io.disconnect();
   }, []);
 
-  // ---- ORDENACIÓN Y NAVEGACIÓN POR CATEGORÍAS (no filtra, sólo anclas) ----
-  const categories = useCategories(uploads);
+  const categories = useOrderedCategories(sortedUploads);
 
-  // uploads ordenados por categoría y luego por uploaded_at (y por id como respaldo)
-  const sortedUploads = useMemo(() => {
-    const arr = [...uploads];
-    arr.sort((a, b) => {
-      const ca = ((a.category || DEFAULT_CATEGORY) + '').trim();
-      const cb = ((b.category || DEFAULT_CATEGORY) + '').trim();
-      const byCat = ca.localeCompare(cb, 'es', { sensitivity: 'base' });
-      if (byCat !== 0) return byCat;
-      const ta = a.uploaded_at ? new Date(a.uploaded_at).getTime() : 0;
-      const tb = b.uploaded_at ? new Date(b.uploaded_at).getTime() : 0;
-      if (ta !== tb) return ta - tb;
-      return (a.id || 0) - (b.id || 0);
-    });
-    return arr;
-  }, [uploads]);
-
-  // Índice del primer elemento de cada categoría (para slideshow / fallback)
-  const firstIndexByCategory = useMemo(() => {
-    const map = {};
-    for (let i = 0; i < sortedUploads.length; i++) {
-      const cat = ((sortedUploads[i].category || DEFAULT_CATEGORY) + '').trim();
-      if (map[cat] === undefined) map[cat] = i;
-    }
-    return map;
-  }, [sortedUploads]);
-
-  // Mapa id -> índice global (para abrir visor desde cualquier item)
-  const indexById = useMemo(() => {
-    const m = new Map();
-    sortedUploads.forEach((u, i) => m.set(u.id, i));
-    return m;
-  }, [sortedUploads]);
-
-  // Observer para activar la categoría según el scroll (anclas invisibles)
+  // Actualiza categoría activa según scroll (intersección de anclas)
   useEffect(() => {
-    if (!categories.length) return;
-    const options = { root: null, rootMargin: '0px 0px -75% 0px', threshold: 0 };
-    const io = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          const cat = entry.target.getAttribute('data-cat');
-          if (cat) setActiveCategory(cat);
-        }
-      });
-    }, options);
-
-    categories.forEach((cat) => {
-      const el = document.getElementById(`cat-${slugCat(cat)}`);
-      if (el) io.observe(el);
-    });
+    const anchors = categories.map(c => anchorRefs.current[slug(c)]).filter(Boolean);
+    if (!anchors.length) return;
+    const io = new IntersectionObserver(entries => {
+      // el primer anchor que cruza el viewport
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible[0]) {
+        const id = visible[0].target.getAttribute('data-cat');
+        if (id && id !== activeCategory) setActiveCategory(id);
+      }
+    }, { root: null, threshold: [0, 0.25, 0.5, 0.75, 1], rootMargin: '0px 0px -70% 0px' });
+    anchors.forEach(a => io.observe(a));
     return () => io.disconnect();
   }, [categories]);
 
   const scrollToCategory = (cat) => {
-    const el = document.getElementById(`cat-${slugCat(cat)}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const ref = anchorRefs.current[slug(cat)];
+    if (ref) ref.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setActiveCategory(cat);
   };
 
@@ -234,8 +230,8 @@ const EventGallery = () => {
       toast({ title: 'Galería vacía', description: 'No hay imágenes para el slideshow.' });
       return;
     }
-    const start = firstIndexByCategory[activeCategory] ?? 0;
-    setSelectedMediaIndex(start);
+    const startAt = Math.max(0, sortedUploads.findIndex(u => normalizeCategory(u) === activeCategory));
+    setSelectedMediaIndex(startAt === -1 ? 0 : startAt);
     setIsSlideshow(true);
   };
 
@@ -267,9 +263,9 @@ const EventGallery = () => {
     toast({ title: 'Preparando descarga...', description: 'Esto puede tardar unos minutos.' });
 
     const zip = new JSZip();
-    for (const upload of uploads) {
+    for (const upload of sortedUploads) {
       try {
-        const response = await fetch(upload.file_url);
+        const response = await fetch(upload.file_url); // ORIGINAL para ZIP
         const blob = await response.blob();
         zip.file(upload.file_name || `${upload.id}`, blob);
       } catch (e) {
@@ -328,11 +324,7 @@ const EventGallery = () => {
           .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
 
           /* Micro-animación del chevron */
-          @keyframes nudge {
-            0% { transform: translateY(0); opacity: .9; }
-            50% { transform: translateY(4px); opacity: 1; }
-            100% { transform: translateY(0); opacity: .9; }
-          }
+          @keyframes nudge { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(4px); opacity: 1; } 100% { transform: translateY(0); opacity: .9; } }
           .chevron-anim { animation: nudge 1.6s ease-in-out infinite; }
         `}
       </style>
@@ -440,60 +432,65 @@ const EventGallery = () => {
       <div id="gallery-start" />
       <main>
         <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10">
+          {/* Masonry de TODOS los uploads, ordenados por categoría y fecha */}
           <div className="masonry">
-            {/* Anclas invisibles + elementos ordenados por categoría */}
-            {categories.flatMap((cat) => {
-              const items = sortedUploads.filter(u => ((u.category || DEFAULT_CATEGORY) + '').trim() === cat);
-              const anchor = (
-                <div
-                  key={`anchor-${cat}`}
-                  id={`cat-${slugCat(cat)}`}
-                  data-cat={cat}
-                  className="masonry-item"
-                  style={{ height: 0, margin: 0, padding: 0 }}
-                />
-              );
-              const nodes = items.map((upload) => (
+            {sortedUploads.map((upload, idx) => {
+              const cat = normalizeCategory(upload);
+              const id = slug(cat);
+              const isFirstOfCat = idx === 0 || normalizeCategory(sortedUploads[idx - 1]) !== cat;
+              const mediaUrl = upload.type === 'video' ? upload.file_url : (upload.web_url || upload.file_url);
+
+              return (
                 <motion.div
                   key={upload.id}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ duration: 0.35 }}
-                  className="masonry-item cursor-pointer"
+                  className="masonry-item cursor-pointer relative"
                   onClick={() => {
                     lastActiveElRef.current = document.activeElement;
-                    const idx = indexById.get(upload.id) ?? 0;
                     setSelectedMediaIndex(idx);
                   }}
                   title={upload.title || ''}
                 >
-                  {upload.type === 'video' ? (
-                    <div className="relative bg-black">
-                      <video src={upload.file_url} className="w-full h-auto" playsInline muted />
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <VideoIcon className="w-10 h-10 text-white/90" />
-                      </div>
-                    </div>
-                  ) : (
-                    <img
-                      src={upload.file_url}
-                      alt={upload.title || 'Foto del evento'}
-                      className="w-full h-auto select-none"
-                      loading="lazy"
-                      decoding="async"
+                  {/* Ancla invisible para navegación por categoría */}
+                  {isFirstOfCat && (
+                    <div
+                      ref={(el) => { if (el) anchorRefs.current[id] = el; }}
+                      data-cat={cat}
+                      id={`cat-${id}`}
+                      className="absolute -top-24"
+                      aria-hidden
                     />
                   )}
+
+                  {upload.type === 'video'
+                    ? (
+                      <div className="relative bg-black">
+                        <video src={mediaUrl} className="w-full h-auto" playsInline muted />
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <VideoIcon className="w-10 h-10 text-white/90" />
+                        </div>
+                      </div>
+                    )
+                    : (
+                      <img
+                        src={mediaUrl}
+                        alt={upload.title || 'Foto del evento'}
+                        className="w-full h-auto select-none"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    )}
                 </motion.div>
-              ));
-              return [anchor, ...nodes];
+              );
             })}
           </div>
-
           {sortedUploads.length === 0 && (
             <div className="text-center py-20">
               <ImageIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-2xl font-semibold">Galería vacía</h3>
-              <p className="text-gray-600 mt-2">No hay fotos o videos en la galería.</p>
+              <p className="text-gray-600 mt-2">No hay fotos o videos en esta categoría.</p>
             </div>
           )}
         </section>
@@ -512,6 +509,7 @@ const EventGallery = () => {
             onClose={() => {
               setSelectedMediaIndex(null);
               setIsSlideshow(false);
+              // devolver foco
               if (lastActiveElRef.current && lastActiveElRef.current.focus) {
                 try { lastActiveElRef.current.focus(); } catch {}
               }
@@ -554,7 +552,7 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       const u = uploads[i];
       if (!u || u.type === 'video') return;
       const img = new Image();
-      img.src = u.file_url;
+      img.src = (u.web_url || u.file_url);
     };
     preload((currentIndex + 1) % uploads.length);
     preload((currentIndex - 1 + uploads.length) % uploads.length);
@@ -578,6 +576,7 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       else if (e.key === ' ') { e.preventDefault(); setIsPlaying(p => !p); setIsSlideshow(true); }
     };
     window.addEventListener('keydown', onKey);
+    // Foco en el botón de cerrar al abrir
     closeBtnRef?.current?.focus?.();
     return () => window.removeEventListener('keydown', onKey);
   }, [goToNext, goToPrev, onClose, setIsSlideshow, closeBtnRef]);
@@ -591,8 +590,10 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
       return;
     }
-    window.open(currentMedia.file_url, '_blank');
+    window.open(currentMedia.file_url, '_blank'); // ORIGINAL al descargar
   };
+
+  const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
 
   return (
     <motion.div
@@ -605,6 +606,7 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
       onClick={onClose}
     >
+      {/* Anuncio de estado (accesibilidad) */}
       <div className="sr-only" aria-live="polite">
         {`Mostrando elemento ${currentIndex + 1} de ${uploads.length}`}
       </div>
@@ -664,8 +666,8 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
             className="flex items-center justify-center"
           >
             {currentMedia.type === 'video'
-              ? <video src={currentMedia.file_url} controls autoPlay className="lightbox-media" />
-              : <img src={currentMedia.file_url} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" decoding="async" />}
+              ? <video src={mediaUrl} controls autoPlay className="lightbox-media" />
+              : <img src={mediaUrl} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" decoding="async" />}
           </motion.div>
         </AnimatePresence>
         <Button
