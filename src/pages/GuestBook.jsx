@@ -10,20 +10,6 @@ import { supabase } from '@/lib/customSupabaseClient';
 const VIDEO_CATEGORY = 'Saludos';
 const DEFAULT_TITLE_PREFIX = 'Saludo de';
 
-const pickSupportedMime = () => {
-  const candidates = [
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-    'video/mp4;codecs=h264',
-    'video/mp4',
-  ];
-  for (const t of candidates) {
-    try { if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t; } catch {}
-  }
-  return '';
-};
-
 const GuestBook = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -63,6 +49,7 @@ const GuestBook = () => {
     return data;
   }, [eventId, navigate]);
 
+  // Privado: solo trae mensajes del invitado actual
   const fetchMessages = useCallback(async (name) => {
     if (!name) return;
     const { data, error } = await supabase
@@ -80,11 +67,16 @@ const GuestBook = () => {
 
   useEffect(() => {
     (async () => {
-      const storedGuestName = sessionStorage.getItem('guestName') || localStorage.getItem(`mitus_guest_name_${eventId}`);
-      if (!storedGuestName) { navigate(`/event/${eventId}`); return; }
-      setGuestName(storedGuestName);
-      await fetchEvent();
-      await fetchMessages(storedGuestName); // solo los suyos (privado)
+      setLoading(true);
+      try {
+        const storedGuestName = sessionStorage.getItem('guestName') || localStorage.getItem(`mitus_guest_name_${eventId}`);
+        if (!storedGuestName) { navigate(`/event/${eventId}`); return; }
+        setGuestName(storedGuestName);
+        await fetchEvent();
+        await fetchMessages(storedGuestName); // solo los suyos (privado)
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [eventId, navigate, fetchEvent, fetchMessages]);
 
@@ -172,10 +164,9 @@ const GuestBook = () => {
       };
 
       recorderRef.current = rec;
-      // Usar timeslice para forzar buffer periódico en navegadores que no envían datos hasta stop
+      // Usar timeslice para forzar buffer periódico en navegadores que no emiten datos hasta stop
       rec.start(1000);
 
-      // Autoplay del stream local en un elemento de video (lo montamos vía ref/callback en el JSX)
     } catch (err) {
       console.error('getUserMedia/MediaRecorder error', err);
       toast({ title: 'No se pudo iniciar la grabación', description: err.message || 'Activa los permisos o usa la cámara del teléfono.', variant: 'destructive' });
@@ -218,7 +209,7 @@ const GuestBook = () => {
       const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
       const rand = Math.random().toString(36).slice(2, 8);
       const ext = (videoBlob.type && videoBlob.type.includes('mp4')) ? 'mp4' : 'webm';
-      const baseName = `${DEFAULT_TITLE_PREFIX} ${guestName || 'Invitado'}`.trim().replace(/ +/g, '-');
+      const baseName = `${DEFAULT_TITLE_PREFIX} ${guestName || 'Invitado'}`.trim().replace(/\s+/g, '-');
       const safeName = `${baseName}.${ext}`.toLowerCase().replace(/[^a-z0-9._-]/g, '_');
       const filePath = `${eventId}/saludos/${stamp}_${rand}_${safeName}`;
 

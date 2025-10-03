@@ -170,7 +170,7 @@ const EventLanding = () => {
 
             <div className="absolute -bottom-4 left-1/2 transform -translate-x-1/2">
               <div className="bg-gradient-to-r from-gray-700 to-gray-500 px-6 py-2 rounded-full border-4 border-white shadow-lg">
-                <span className="text-white font-semibold">¡Únete al evento!</span>
+                <span className="text-white font-semibold">¡Haz parte de esta historia!</span>
               </div>
             </div>
           </div>
