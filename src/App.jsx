@@ -51,6 +51,7 @@ function App() {
         <meta name="description" content="Crea invitaciones y álbumes digitales para bodas, quinceaños y eventos. Los invitados confirman asistencia y suben fotos al instante." />
       </Helmet>
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
