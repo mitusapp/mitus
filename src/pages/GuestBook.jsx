@@ -37,10 +37,9 @@ const GuestBook = () => {
   const [loading, setLoading] = useState(true);
 
   // --- Video recording state ---
-  const [recSupportedType, setRecSupportedType] = useState('');
   const [recording, setRecording] = useState(false);
   const [stream, setStream] = useState(null);
-  const [recorder, setRecorder] = useState(null);
+  const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const [previewUrl, setPreviewUrl] = useState('');
   const [videoBlob, setVideoBlob] = useState(null); // Blob cuando grabamos con MediaRecorder o archivo nativo
@@ -49,43 +48,47 @@ const GuestBook = () => {
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef(null);
 
-  const fetchGuestbookData = useCallback(async () => {
-    setLoading(true);
-    const { data: eventData, error: eventError } = await supabase
+  const fetchEvent = useCallback(async () => {
+    const { data, error } = await supabase
       .from('events')
       .select('id, title, settings')
       .eq('id', eventId)
       .single();
-
-    if (eventError || !eventData) {
+    if (error || !data) {
       toast({ title: 'Evento no encontrado', description: 'El evento que buscas no existe.', variant: 'destructive' });
       navigate('/');
-      return;
+      return null;
     }
-    setEvent(eventData);
+    setEvent(data);
+    return data;
+  }, [eventId, navigate]);
 
-    const { data: messagesData, error: messagesError } = await supabase
+  const fetchMessages = useCallback(async (name) => {
+    if (!name) return;
+    const { data, error } = await supabase
       .from('guestbook_messages')
       .select('*')
       .eq('event_id', eventId)
+      .eq('guest_name', name)
       .order('created_at', { ascending: false });
-
-    if (messagesError) {
-      console.error('Error fetching messages:', messagesError);
-    } else {
-      setMessages(messagesData || []);
+    if (error) {
+      console.error('Error fetching messages:', error);
+      return;
     }
-    setLoading(false);
-  }, [eventId, navigate]);
+    setMessages(data || []);
+  }, [eventId]);
 
   useEffect(() => {
-    const storedGuestName = sessionStorage.getItem('guestName') || localStorage.getItem(`mitus_guest_name_${eventId}`);
-    if (!storedGuestName) { navigate(`/event/${eventId}`); return; }
-    setGuestName(storedGuestName);
-    fetchGuestbookData();
-    setRecSupportedType(pickSupportedMime());
-  }, [eventId, navigate, fetchGuestbookData]);
+    (async () => {
+      const storedGuestName = sessionStorage.getItem('guestName') || localStorage.getItem(`mitus_guest_name_${eventId}`);
+      if (!storedGuestName) { navigate(`/event/${eventId}`); return; }
+      setGuestName(storedGuestName);
+      await fetchEvent();
+      await fetchMessages(storedGuestName); // solo los suyos (privado)
+    })();
+  }, [eventId, navigate, fetchEvent, fetchMessages]);
 
+  // Cleanup
   useEffect(() => {
     return () => {
       if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch {} }
@@ -94,6 +97,7 @@ const GuestBook = () => {
     };
   }, [previewUrl, stream]);
 
+  // --- Texto: enviar ---
   const handleSubmitMessage = async () => {
     if (!textMessage.trim()) {
       toast({ title: 'Mensaje vacío', description: 'Por favor escribe un mensaje antes de enviar', variant: 'destructive' });
@@ -104,7 +108,7 @@ const GuestBook = () => {
       const payload = { event_id: eventId, guest_name: guestName, type: 'text', content: textMessage.trim() };
       const { data, error } = await supabase.from('guestbook_messages').insert(payload).select().single();
       if (error) throw error;
-      setMessages(prev => [data, ...prev]);
+      setMessages(prev => [data, ...prev]); // lista privada
       setTextMessage('');
       toast({ title: '¡Mensaje enviado!', description: 'Tu mensaje se ha agregado al libro de visitas' });
     } catch (error) {
@@ -114,7 +118,7 @@ const GuestBook = () => {
     }
   };
 
-  // --- Recording controls ---
+  // --- Grabación ---
   const startRecording = async () => {
     if (recording) return;
     if (event?.settings?.allowVideoUpload === false) {
@@ -123,36 +127,70 @@ const GuestBook = () => {
     }
     try {
       if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch {} }
+      setPreviewUrl('');
       setVideoBlob(null);
       setSeconds(0);
+
       const media = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
       setStream(media);
-      const recType = pickSupportedMime();
-      const rec = new MediaRecorder(media, recType ? { mimeType: recType } : undefined);
+
+      if (!window.MediaRecorder) throw new Error('MediaRecorder no soportado en este navegador');
+
+      // Elegir MIME soportado
+      const candidates = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4;codecs=h264',
+        'video/mp4',
+      ];
+      let mimeType = '';
+      for (const t of candidates) { try { if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; } } catch {} }
+
+      const rec = new MediaRecorder(media, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
+
       rec.ondataavailable = (e) => { if (e.data && e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onerror = (e) => { console.error('MediaRecorder error', e); toast({ title: 'Error de grabación', description: 'Intenta de nuevo o usa la cámara del teléfono.', variant: 'destructive' }); };
+      rec.onstart = () => {
+        // contador
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+        setRecording(true);
+      };
       rec.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || 'video/webm' });
+        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+        const type = rec.mimeType || mimeType || 'video/webm';
+        const blob = new Blob(chunksRef.current, { type });
         const url = URL.createObjectURL(blob);
         setVideoBlob(blob);
         setPreviewUrl(url);
         media.getTracks().forEach(t => t.stop());
         setStream(null);
-        if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
         setRecording(false);
+        recorderRef.current = null;
       };
-      rec.start();
-      setRecorder(rec);
-      setRecording(true);
-      // contador simple
-      timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
+
+      recorderRef.current = rec;
+      // Usar timeslice para forzar buffer periódico en navegadores que no envían datos hasta stop
+      rec.start(1000);
+
+      // Autoplay del stream local en un elemento de video (lo montamos vía ref/callback en el JSX)
     } catch (err) {
-      console.error('getUserMedia error', err);
-      toast({ title: 'No se pudo acceder a la cámara/micrófono', description: 'Activa los permisos o usa la captura nativa del teléfono.', variant: 'destructive' });
+      console.error('getUserMedia/MediaRecorder error', err);
+      toast({ title: 'No se pudo iniciar la grabación', description: err.message || 'Activa los permisos o usa la cámara del teléfono.', variant: 'destructive' });
+      try { stream?.getTracks().forEach(t => t.stop()); } catch {}
+      setStream(null);
+      setRecording(false);
     }
   };
 
-  const stopRecording = () => { if (recorder && recording) { try { recorder.stop(); } catch {} } };
+  const stopRecording = () => {
+    const rec = recorderRef.current;
+    if (rec && rec.state === 'recording') {
+      try { rec.stop(); } catch (e) { console.error('stop error', e); }
+    }
+  };
 
   const discardRecording = () => {
     if (previewUrl) { try { URL.revokeObjectURL(previewUrl); } catch {} }
@@ -179,8 +217,8 @@ const GuestBook = () => {
       const now = new Date();
       const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
       const rand = Math.random().toString(36).slice(2, 8);
+      const ext = (videoBlob.type && videoBlob.type.includes('mp4')) ? 'mp4' : 'webm';
       const baseName = `${DEFAULT_TITLE_PREFIX} ${guestName || 'Invitado'}`.trim().replace(/ +/g, '-');
-      const ext = (videoBlob.type.includes('mp4') ? 'mp4' : 'webm');
       const safeName = `${baseName}.${ext}`.toLowerCase().replace(/[^a-z0-9._-]/g, '_');
       const filePath = `${eventId}/saludos/${stamp}_${rand}_${safeName}`;
 
@@ -194,13 +232,13 @@ const GuestBook = () => {
       // Insertar en uploads para que aparezca en la galería
       const row = {
         event_id: eventId,
-        guest_name: guestName || null,
+        guest_name: guestName,
         file_name: safeName,
         file_size: videoBlob.size,
         file_type: videoBlob.type || (ext === 'mp4' ? 'video/mp4' : 'video/webm'),
         file_url: urlData.publicUrl,    // ORIGINAL (para videos)
-        web_url: urlData.publicUrl,     // usamos el mismo para videos
-        title: `${DEFAULT_TITLE_PREFIX} ${guestName || ''}`.trim(),
+        web_url: urlData.publicUrl,     // mismo para videos
+        title: `${DEFAULT_TITLE_PREFIX} ${guestName}`.trim(),
         description: '',
         type: 'video',
         category: VIDEO_CATEGORY,
@@ -211,10 +249,10 @@ const GuestBook = () => {
       const { error: dbError } = await supabase.from('uploads').insert([row]);
       if (dbError) throw dbError;
 
-      // También crear una entrada en guestbook_messages con link al video
+      // También crear una entrada en guestbook_messages con link al video (privado: guest_name obligatorio)
       const messagePayload = {
         event_id: eventId,
-        guest_name: guestName || null,
+        guest_name: guestName,
         type: 'video',
         content: urlData.publicUrl,
       };
@@ -226,7 +264,7 @@ const GuestBook = () => {
       if (msgError) throw msgError;
       setMessages(prev => [msgData, ...prev]);
 
-      toast({ title: '¡Video enviado!', description: 'Tu saludo aparecerá en la galería y en el libro de visitas.' });
+      toast({ title: '¡Video enviado!', description: 'Tu saludo aparecerá en tu libro de visitas y en la galería.' });
       // Reset estados
       discardRecording();
     } catch (err) {
@@ -249,210 +287,215 @@ const GuestBook = () => {
   }
 
   return (
-    <div className="min-h-screen py-10 px-6 bg-gray-50">
-      <div className="max-w-5xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-          {/* Header */}
-          <div className="flex items-center mb-8">
-            <Button variant="ghost" onClick={() => navigate(`/event/${eventId}`)} className="text-gray-700 hover:bg-gray-200/60 mr-4">
-              <ArrowLeft className="w-5 h-5" />
-            </Button>
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Libro de Visitas</h1>
-              <p className="text-gray-600">Deja un mensaje especial para {event?.title}</p>
-            </div>
+    <div className="min-h-screen bg-gray-50">
+      {/* TOP BAR sticky (alineado con GuestUpload) */}
+      <div className="sticky top-0 z-40 border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/75 shadow-sm">
+        <div className="max-w-5xl mx-auto px-6 py-3 flex items-center">
+          <Button variant="ghost" onClick={() => navigate(`/event/${eventId}`)} className="text-gray-700 hover:bg-gray-200/60 mr-4">
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-gray-900">Libro de Visitas</h1>
+            <p className="text-sm text-gray-600 truncate">Deja un mensaje especial para {event?.title}</p>
           </div>
+        </div>
+      </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
-            {/* Columna izquierda: enviar mensaje / video */}
-            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-                <Heart className="w-5 h-5 mr-2 text-gray-500" />
-                Deja tu mensaje, {guestName}
-              </h2>
+      {/* Contenido */}
+      <div className="py-8 px-6 pb-24">
+        <div className="max-w-5xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+            <div className="grid lg:grid-cols-2 gap-8">
+              {/* Columna izquierda: enviar mensaje / video */}
+              <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                  <Heart className="w-5 h-5 mr-2 text-gray-500" />
+                  Deja tu mensaje, {guestName}
+                </h2>
 
-              {/* Tabs */}
-              <div className="flex bg-gray-100 rounded-xl p-1 mb-6 border border-gray-200">
-                <button
-                  onClick={() => setActiveTab('text')}
-                  className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-300 flex items-center justify-center ${
-                    activeTab === 'text' ? 'bg-white border border-gray-300 text-gray-900' : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <MessageSquare className="w-4 h-4 mr-2" />
-                  Mensaje de Texto
-                </button>
-                <button
-                  onClick={() => setActiveTab('video')}
-                  className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-300 flex items-center justify-center ${
-                    activeTab === 'video' ? 'bg-white border border-gray-300 text-gray-900' : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <VideoIcon className="w-4 h-4 mr-2" />
-                  Video Mensaje
-                </button>
-              </div>
-
-              {activeTab === 'text' && (
-                <div className="space-y-4">
-                  <textarea
-                    value={textMessage}
-                    onChange={(e) => setTextMessage(e.target.value)}
-                    placeholder="Escribe un mensaje hermoso para los anfitriones..."
-                    rows={6}
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent resize-none"
-                  />
-
-                  <Button
-                    onClick={handleSubmitMessage}
-                    disabled={!textMessage.trim() || submitting}
-                    className="w-full bg-gradient-to-r from-gray-700 to-gray-500 hover:from-gray-800 hover:to-gray-600 text-white py-3 rounded-xl shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                {/* Tabs */}
+                <div className="flex bg-gray-100 rounded-xl p-1 mb-6 border border-gray-200">
+                  <button
+                    onClick={() => setActiveTab('text')}
+                    className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-300 flex items-center justify-center ${
+                      activeTab === 'text' ? 'bg-white border border-gray-300 text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                    }`}
                   >
-                    {submitting ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Enviando...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4 mr-2" />
-                        Enviar Mensaje
-                      </>
-                    )}
-                  </Button>
+                    <MessageSquare className="w-4 h-4 mr-2" />
+                    Mensaje de Texto
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('video')}
+                    className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all duration-300 flex items-center justify-center ${
+                      activeTab === 'video' ? 'bg-white border border-gray-300 text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    <VideoIcon className="w-4 h-4 mr-2" />
+                    Video Mensaje
+                  </button>
                 </div>
-              )}
 
-              {activeTab === 'video' && (
-                <div className="space-y-4">
-                  {/* Vista previa o stream */}
-                  <div className="aspect-video w-full bg-gray-100 border border-gray-200 rounded-xl overflow-hidden flex items-center justify-center">
-                    {/* Cuando estamos grabando, mostramos el stream en vivo */}
-                    {recording && stream ? (
-                      <video
-                        className="w-full h-full object-cover"
-                        ref={(el) => { if (el && stream) { try { el.srcObject = stream; el.muted = true; el.playsInline = true; el.play().catch(() => {}); } catch {} } }}
-                        autoPlay
-                      />
-                    ) : previewUrl ? (
-                      <video src={previewUrl} controls className="w-full h-full object-contain bg-black" />
-                    ) : (
-                      <div className="text-center text-gray-500">
-                        <VideoIcon className="w-12 h-12 mx-auto mb-2" />
-                        <p>Tu video aparecerá aquí</p>
-                      </div>
-                    )}
-                  </div>
+                {activeTab === 'text' && (
+                  <div className="space-y-4">
+                    <textarea
+                      value={textMessage}
+                      onChange={(e) => setTextMessage(e.target.value)}
+                      placeholder="Escribe un mensaje hermoso para los anfitriones..."
+                      rows={6}
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent resize-none"
+                    />
 
-                  {/* Controles de grabación */}
-                  <div className="flex flex-wrap gap-2">
-                    {!recording && !previewUrl && (
-                      <Button onClick={startRecording} className="bg-gray-900 hover:bg:black text-white">
-                        <Mic className="w-4 h-4 mr-2" /> Iniciar grabación
-                      </Button>
-                    )}
-                    {recording && (
-                      <Button onClick={stopRecording} variant="destructive" className="bg-red-600 hover:bg-red-700 text-white">
-                        <Square className="w-4 h-4 mr-2" /> Detener
-                      </Button>
-                    )}
-                    {!recording && previewUrl && (
-                      <Button onClick={discardRecording} variant="outline" className="border-gray-300">
-                        <RefreshCw className="w-4 h-4 mr-2" /> Regrabar
-                      </Button>
-                    )}
-
-                    {/* Captura nativa en móviles (fallback) */}
-                    {!recording && (
-                      <Button onClick={openNativeCapture} variant="outline" className="border-gray-300">
-                        <UploadIcon className="w-4 h-4 mr-2" /> Usar cámara del teléfono
-                      </Button>
-                    )}
-
-                    {/* Timer simple */}
-                    {recording && (
-                      <span className="inline-flex items-center px-3 py-2 text-sm rounded-lg bg-gray-100 border border-gray-200 text-gray-800">
-                        {String(Math.floor(seconds / 60)).padStart(2, '0')}
-                        :
-                        {String(seconds % 60).padStart(2, '0')}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="pt-2">
                     <Button
-                      onClick={uploadVideo}
-                      disabled={!videoBlob || uploadingVideo}
-                      className="w-full bg-gradient-to-r from-gray-700 to-gray-500 hover:from-gray-800 hover:to-gray-600 text-white py-3 rounded-xl shadow-md disabled:opacity-50"
+                      onClick={handleSubmitMessage}
+                      disabled={!textMessage.trim() || submitting}
+                      className="w-full bg-gradient-to-r from-gray-700 to-gray-500 hover:from-gray-800 hover:to-gray-600 text-white py-3 rounded-xl shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {uploadingVideo ? (
+                      {submitting ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                          Subiendo...
+                          Enviando...
                         </>
                       ) : (
                         <>
-                          <VideoIcon className="w-4 h-4 mr-2" />
-                          Enviar Video Mensaje a la Galería
+                          <Send className="w-4 h-4 mr-2" />
+                          Enviar Mensaje
                         </>
                       )}
                     </Button>
-                    <p className="text-xs text-gray-500 mt-2">Se guardará en la categoría <span className="font-medium">{VIDEO_CATEGORY}</span> con el título “{DEFAULT_TITLE_PREFIX} {guestName || 'Invitado'}”.</p>
                   </div>
+                )}
 
-                  {/* input para captura nativa */}
-                  <input ref={fileInputRef} type="file" accept="video/*" capture="user" hidden onChange={onNativeFile} />
-                </div>
-              )}
-            </div>
-
-            {/* Columna derecha: mensajes existentes */}
-            <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-              <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-                <MessageSquare className="w-5 h-5 mr-2 text-gray-500" />
-                Mensajes de los Invitados ({messages.length})
-              </h2>
-
-              <div className="space-y-4 max-h-96 overflow-y-auto">
-                {messages.length === 0 ? (
-                  <div className="text-center py-8 text-gray-600">
-                    <Heart className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                    <p>Aún no hay mensajes. ¡Sé el primero en dejar uno!</p>
-                  </div>
-                ) : (
-                  messages.map((message, index) => (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: index * 0.05 }}
-                      className="bg-gray-50 rounded-xl p-4 border border-gray-200"
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center text-sm text-gray-700">
-                          <User className="w-4 h-4 mr-2" />
-                          <span className="font-medium text-gray-900">{message.guest_name}</span>
-                        </div>
-                        <div className="flex items-center text-xs text-gray-500">
-                          <Calendar className="w-3 h-3 mr-1" />
-                          <span>{new Date(message.created_at).toLocaleDateString('es-ES')}</span>
-                        </div>
-                      </div>
-
-                      {message.type === 'video' ? (
-                        <a href={message.content} target="_blank" rel="noreferrer" className="text-gray-700 underline break-all">
-                          Ver video mensaje
-                        </a>
+                {activeTab === 'video' && (
+                  <div className="space-y-4">
+                    {/* Vista previa o stream */}
+                    <div className="aspect-video w-full bg-gray-100 border border-gray-200 rounded-xl overflow-hidden flex items-center justify-center">
+                      {/* Cuando estamos grabando, mostramos el stream en vivo */}
+                      {recording && stream ? (
+                        <video
+                          className="w-full h-full object-cover"
+                          ref={(el) => { if (el && stream) { try { el.srcObject = stream; el.muted = true; el.playsInline = true; el.play().catch(() => {}); } catch {} } }}
+                          autoPlay
+                        />
+                      ) : previewUrl ? (
+                        <video src={previewUrl} controls className="w-full h-full object-contain bg-black" />
                       ) : (
-                        <p className="text-gray-800 leading-relaxed">{message.content}</p>
+                        <div className="text-center text-gray-500">
+                          <VideoIcon className="w-12 h-12 mx-auto mb-2" />
+                          <p>Tu video aparecerá aquí</p>
+                        </div>
                       )}
-                    </motion.div>
-                  ))
+                    </div>
+
+                    {/* Controles de grabación */}
+                    <div className="flex flex-wrap gap-2">
+                      {!recording && !previewUrl && (
+                        <Button onClick={startRecording} className="bg-gray-900 hover:bg-black text-white">
+                          <Mic className="w-4 h-4 mr-2" /> Iniciar grabación
+                        </Button>
+                      )}
+                      {recording && (
+                        <Button onClick={stopRecording} variant="destructive" className="bg-red-600 hover:bg-red-700 text-white">
+                          <Square className="w-4 h-4 mr-2" /> Detener
+                        </Button>
+                      )}
+                      {!recording && previewUrl && (
+                        <Button onClick={discardRecording} variant="outline" className="border-gray-300">
+                          <RefreshCw className="w-4 h-4 mr-2" /> Regrabar
+                        </Button>
+                      )}
+
+                      {/* Captura nativa en móviles (fallback) */}
+                      {!recording && (
+                        <Button onClick={openNativeCapture} variant="outline" className="border-gray-300">
+                          <UploadIcon className="w-4 h-4 mr-2" /> Usar cámara del teléfono
+                        </Button>
+                      )}
+
+                      {/* Timer simple */}
+                      {recording && (
+                        <span className="inline-flex items-center px-3 py-2 text-sm rounded-lg bg-gray-100 border border-gray-200 text-gray-800">
+                          {String(Math.floor(seconds / 60)).padStart(2, '0')}
+                          :
+                          {String(seconds % 60).padStart(2, '0')}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="pt-2">
+                      <Button
+                        onClick={uploadVideo}
+                        disabled={!videoBlob || uploadingVideo}
+                        className="w-full bg-gradient-to-r from-gray-700 to-gray-500 hover:from-gray-800 hover:to-gray-600 text-white py-3 rounded-xl shadow-md disabled:opacity-50"
+                      >
+                        {uploadingVideo ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Subiendo...
+                          </>
+                        ) : (
+                          <>
+                            <VideoIcon className="w-4 h-4 mr-2" />
+                            Enviar Video Mensaje a la Galería
+                          </>
+                        )}
+                      </Button>
+                      <p className="text-xs text-gray-500 mt-2">Se guardará en la categoría <span className="font-medium">{VIDEO_CATEGORY}</span> con el título “{DEFAULT_TITLE_PREFIX} {guestName || 'Invitado'}”.</p>
+                    </div>
+
+                    {/* input para captura nativa */}
+                    <input ref={fileInputRef} type="file" accept="video/*" capture="user" hidden onChange={onNativeFile} />
+                  </div>
                 )}
               </div>
+
+              {/* Columna derecha: mensajes (PRIVADOS: solo los del invitado) */}
+              <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                  <MessageSquare className="w-5 h-5 mr-2 text-gray-500" />
+                  Tus Mensajes ({messages.length})
+                </h2>
+
+                <div className="space-y-4 max-h-96 overflow-y-auto">
+                  {messages.length === 0 ? (
+                    <div className="text-center py-8 text-gray-600">
+                      <Heart className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p>Aún no has dejado mensajes. ¡Escribe uno o graba tu saludo!</p>
+                    </div>
+                  ) : (
+                    messages.map((message, index) => (
+                      <motion.div
+                        key={message.id}
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.3, delay: index * 0.05 }}
+                        className="bg-gray-50 rounded-xl p-4 border border-gray-200"
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center text-sm text-gray-700">
+                            <User className="w-4 h-4 mr-2" />
+                            <span className="font-medium text-gray-900">{message.guest_name}</span>
+                          </div>
+                          <div className="flex items-center text-xs text-gray-500">
+                            <Calendar className="w-3 h-3 mr-1" />
+                            <span>{new Date(message.created_at).toLocaleDateString('es-ES')}</span>
+                          </div>
+                        </div>
+
+                        {message.type === 'video' ? (
+                          <a href={message.content} target="_blank" rel="noreferrer" className="text-gray-700 underline break-all">
+                            Ver video mensaje
+                          </a>
+                        ) : (
+                          <p className="text-gray-800 leading-relaxed">{message.content}</p>
+                        )}
+                      </motion.div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        </motion.div>
+          </motion.div>
+        </div>
       </div>
     </div>
   );
