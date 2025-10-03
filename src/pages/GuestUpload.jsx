@@ -35,7 +35,6 @@ const CATEGORY_UI = {
 
 // --- Helper: compresión de imágenes en el navegador (WebP 1800px máx) ---
 async function compressImageToWeb(file, { maxDim = 1800, quality = 0.82, type = 'image/webp' } = {}) {
-  // Carga en bitmap o <img> (fallback Safari)
   const loadInput = async (f) => {
     try { return await createImageBitmap(f); } catch {
       const url = URL.createObjectURL(f);
@@ -249,7 +248,7 @@ const GuestUpload = () => {
         const { data: origUrlData } = supabase.storage.from('event-media').getPublicUrl(origPath);
 
         let webUrl = origUrlData.publicUrl;
-        let webW = null; let webH = null;
+        let webW = null; let webH = null; let webSize = null;
 
         // 2) Si es foto, generar y subir versión web optimizada (WebP)
         if (type === 'photo') {
@@ -262,7 +261,7 @@ const GuestUpload = () => {
               .upload(webPath, webBlob, { contentType: 'image/webp', cacheControl: '3600', upsert: false });
             if (!uploadWebErr) {
               const { data: webUrlData } = supabase.storage.from('event-media').getPublicUrl(webPath);
-              webUrl = webUrlData.publicUrl; webW = w; webH = h;
+              webUrl = webUrlData.publicUrl; webW = w; webH = h; webSize = webBlob.size;
             }
           } catch (e) {
             console.warn('Fallo al optimizar imagen, usando original para web_url', e);
@@ -279,6 +278,7 @@ const GuestUpload = () => {
           web_url: webUrl,                  // OPTIMIZADO (o original como fallback)
           web_width: webW,
           web_height: webH,
+          web_size: webSize,
           title: file.name,
           description: '',
           type: type === 'video' ? 'video' : 'photo',
