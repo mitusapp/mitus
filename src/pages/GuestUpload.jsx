@@ -33,6 +33,29 @@ const CATEGORY_UI = {
   'Detalles & Decoración': { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-800', hover: 'hover:bg-amber-100' },
 };
 
+// --- Helper: compresión de imágenes en el navegador (WebP 1800px máx) ---
+async function compressImageToWeb(file, { maxDim = 1800, quality = 0.82, type = 'image/webp' } = {}) {
+  // Carga en bitmap o <img> (fallback Safari)
+  const loadInput = async (f) => {
+    try { return await createImageBitmap(f); } catch {
+      const url = URL.createObjectURL(f);
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      URL.revokeObjectURL(url); return img;
+    }
+  };
+  const bmp = await loadInput(file);
+  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const can = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, h) : (() => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; })();
+  const ctx = can.getContext('2d');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  const blob = (can.convertToBlob)
+    ? await can.convertToBlob({ type, quality })
+    : await new Promise((res) => can.toBlob(res, type, quality));
+  return { blob, w, h };
+}
+
 const GuestUpload = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -109,9 +132,7 @@ const GuestUpload = () => {
 
   // Revocar URLs SOLO al desmontar pantalla
   useEffect(() => {
-    return () => {
-      filesRef.current.forEach(f => { if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch {} } });
-    };
+    return () => { filesRef.current.forEach(f => { if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch {} } }); };
   }, []);
 
   const allowPhoto = event?.settings?.allowPhotoUpload ?? true;
@@ -209,57 +230,78 @@ const GuestUpload = () => {
 
     setUploading(true);
 
-    const uploadPromises = files.map(async (item) => {
+    const rows = [];
+
+    for (const item of files) {
       const { file, type, category } = item;
       try {
         const now = new Date();
         const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
         const rand = Math.random().toString(36).slice(2, 8);
         const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const filePath = `${eventId}/${stamp}_${rand}_${safeName}`;
 
-        const { error: uploadError } = await supabase.storage
+        // 1) Subir ORIGINAL siempre
+        const origPath = `${eventId}/orig/${stamp}_${rand}_${safeName}`;
+        const { error: uploadOrigErr } = await supabase.storage
           .from('event-media')
-          .upload(filePath, file, { contentType: file.type, cacheControl: '3600', upsert: false });
+          .upload(origPath, file, { contentType: file.type, cacheControl: '3600', upsert: false });
+        if (uploadOrigErr) throw uploadOrigErr;
+        const { data: origUrlData } = supabase.storage.from('event-media').getPublicUrl(origPath);
 
-        if (uploadError) throw uploadError;
+        let webUrl = origUrlData.publicUrl;
+        let webW = null; let webH = null;
 
-        const { data: urlData } = supabase.storage.from('event-media').getPublicUrl(filePath);
+        // 2) Si es foto, generar y subir versión web optimizada (WebP)
+        if (type === 'photo') {
+          try {
+            const { blob: webBlob, w, h } = await compressImageToWeb(file, { maxDim: 1800, quality: 0.82, type: 'image/webp' });
+            const webSafe = safeName.replace(/\.[^.]+$/, '') + '.webp';
+            const webPath = `${eventId}/web/${stamp}_${rand}_${webSafe}`;
+            const { error: uploadWebErr } = await supabase.storage
+              .from('event-media')
+              .upload(webPath, webBlob, { contentType: 'image/webp', cacheControl: '3600', upsert: false });
+            if (!uploadWebErr) {
+              const { data: webUrlData } = supabase.storage.from('event-media').getPublicUrl(webPath);
+              webUrl = webUrlData.publicUrl; webW = w; webH = h;
+            }
+          } catch (e) {
+            console.warn('Fallo al optimizar imagen, usando original para web_url', e);
+          }
+        }
 
-        return {
+        rows.push({
           event_id: eventId,
           guest_name: guestName.trim() ? guestName.trim() : null,
           file_name: file.name,
           file_size: file.size,
           file_type: file.type,
-          file_url: urlData.publicUrl,
+          file_url: origUrlData.publicUrl, // ORIGINAL
+          web_url: webUrl,                  // OPTIMIZADO (o original como fallback)
+          web_width: webW,
+          web_height: webH,
           title: file.name,
           description: '',
           type: type === 'video' ? 'video' : 'photo',
           category: category || DEFAULT_CATEGORY,
           approved: !(event?.settings?.requireModeration ?? false),
           uploaded_at: new Date().toISOString(),
-        };
+        });
       } catch (error) {
         console.error('Upload error for file:', file.name, error);
         toast({ title: `Error al subir ${file.name}`, description: error.message || 'Hubo un problema. Inténtalo de nuevo.', variant: 'destructive' });
-        return null;
       }
-    });
+    }
 
-    const uploadResults = await Promise.all(uploadPromises);
-    const successfulUploads = uploadResults.filter(Boolean);
-
-    if (successfulUploads.length > 0) {
-      const { error: dbError } = await supabase.from('uploads').insert(successfulUploads);
+    if (rows.length) {
+      const { error: dbError } = await supabase.from('uploads').insert(rows);
       if (dbError) { toast({ title: 'Error al guardar en la base de datos', description: dbError.message, variant: 'destructive' }); }
     }
 
     setUploading(false);
 
-    if (successfulUploads.length > 0) {
+    if (rows.length) {
       toast({
-        title: `¡${successfulUploads.length} de ${files.length} archivos subidos!`,
+        title: `¡${rows.length} de ${files.length} archivos subidos!`,
         description: event?.settings?.requireModeration ? 'Tus archivos están en revisión y aparecerán pronto.' : 'Tus archivos ya están disponibles en la galería.',
       });
       // Revocar URLs y reset
