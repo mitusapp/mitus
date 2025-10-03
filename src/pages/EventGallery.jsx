@@ -1,5 +1,5 @@
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+// src/pages/EventGallery.jsx
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -17,27 +17,15 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
+const DEFAULT_CATEGORY = 'Más momentos';
+
 const useCategories = (uploads) => useMemo(() => {
   const set = new Set();
-  uploads.forEach(u => set.add((u.category || 'Highlights').trim()));
+  uploads.forEach(u => set.add((u.category || DEFAULT_CATEGORY).trim()));
   return Array.from(set);
 }, [uploads]);
 
 const isLandscapeViewport = () => window.innerWidth >= window.innerHeight;
-
-const pickCoverFromUploads = (uploads, wantLandscape) => {
-  if (!uploads?.length) return null;
-  const imgs = uploads.filter(u => u.type !== 'video');
-  if (!imgs.length) return uploads[0]?.file_url || null;
-
-  const byOrientation = imgs.find(u => {
-    const w = u?.metadata?.width, h = u?.metadata?.height;
-    if (!w || !h) return false;
-    return wantLandscape ? w >= h : h > w;
-  });
-
-  return byOrientation?.file_url || imgs[0]?.file_url || null;
-};
 
 const getInitials = (name) => {
   if (!name) return '?';
@@ -45,6 +33,15 @@ const getInitials = (name) => {
   if (parts.length > 1) return `${parts[0][0]} & ${parts[1][0]}`.toUpperCase();
   return name[0].toUpperCase();
 };
+
+// Carga dimensiones reales de una imagen
+const loadImageSize = (src) =>
+  new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
 
 const EventGallery = () => {
   const { eventId } = useParams();
@@ -54,7 +51,7 @@ const EventGallery = () => {
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [activeCategory, setActiveCategory] = useState('Highlights');
+  const [activeCategory, setActiveCategory] = useState(DEFAULT_CATEGORY);
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(null);
   const [isSlideshow, setIsSlideshow] = useState(false);
 
@@ -63,6 +60,15 @@ const EventGallery = () => {
   const [isDownloading, setIsDownloading] = useState(false);
 
   const [coverUrl, setCoverUrl] = useState(null);
+  const [heroLoaded, setHeroLoaded] = useState(false);
+
+  // Sticky shadow para la barra de categorías
+  const [stickyShadow, setStickyShadow] = useState(false);
+  const stickySentinelRef = useRef(null);
+
+  // Referencia para devolver el foco al cerrar el visor
+  const lastActiveElRef = useRef(null);
+  const closeBtnRef = useRef(null);
 
   const fetchEventData = useCallback(async () => {
     setLoading(true);
@@ -82,12 +88,12 @@ const EventGallery = () => {
 
       const { data: uploadsData, error: uploadsError } = await supabase
         .from('uploads')
-        .select('*, metadata:file_url->metadata')
+        .select('*')
         .eq('event_id', eventId)
         .order('uploaded_at', { ascending: true });
 
       if (uploadsError) throw uploadsError;
-      
+
       setUploads(uploadsData || []);
     } catch (error) {
       console.error('Error fetching gallery data:', error);
@@ -103,25 +109,54 @@ const EventGallery = () => {
 
   useEffect(() => { fetchEventData(); }, [fetchEventData]);
 
-  const updateCover = useCallback(() => {
-    const wantLandscape = isLandscapeViewport();
-    const chosen = pickCoverFromUploads(uploads, wantLandscape);
-    setCoverUrl(chosen || event?.cover_image_url || 'https://images.unsplash.com/photo-1509930854872-0f61005b282e');
-  }, [uploads, event?.cover_image_url]);
+  // Selección de portada mejorada por orientación (no bloqueante)
+  const pickCoverAsync = useCallback(async (allUploads) => {
+    if (!allUploads?.length) return event?.cover_image_url || null;
 
-  useEffect(() => { updateCover(); }, [updateCover]);
+    const wantLandscape = isLandscapeViewport();
+    const images = allUploads.filter(u => u.type !== 'video');
+    const candidates = images.length ? images : allUploads; // si no hay fotos, usar videos (mostrar primer frame)
+    if (!candidates.length) return event?.cover_image_url || null;
+
+    // Intento rápido: primera que coincida por orientación real
+    for (let i = 0; i < Math.min(candidates.length, 12); i++) {
+      const u = candidates[i];
+      const src = u.file_url;
+      const size = await loadImageSize(src);
+      if (size && size.w && size.h) {
+        const isLandscape = size.w >= size.h;
+        if ((wantLandscape && isLandscape) || (!wantLandscape && !isLandscape)) {
+          return src;
+        }
+      }
+    }
+    // Fallback: primera imagen o el cover del evento
+    return images[0]?.file_url || event?.cover_image_url || candidates[0]?.file_url || null;
+  }, [event?.cover_image_url]);
 
   useEffect(() => {
-    const onResize = () => updateCover();
-    window.addEventListener('resize', onResize);
-    window.addEventListener('orientationchange', onResize);
-    return () => {
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('orientationchange', onResize);
-    };
-  }, [updateCover]);
+    let cancelled = false;
+    (async () => {
+      const chosen = await pickCoverAsync(uploads);
+      if (!cancelled) setCoverUrl(chosen || 'https://images.unsplash.com/photo-1509930854872-0f61005b282e');
+    })();
+    return () => { cancelled = true; };
+  }, [uploads, pickCoverAsync]);
+
+  // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
+  useEffect(() => {
+    const el = stickySentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setStickyShadow(!entry.isIntersecting),
+      { root: null, threshold: 0 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   const categories = useCategories(uploads);
+
   useEffect(() => {
     if (categories.length && !categories.includes(activeCategory)) {
       setActiveCategory(categories[0]);
@@ -129,7 +164,7 @@ const EventGallery = () => {
   }, [categories, activeCategory]);
 
   const filteredUploads = useMemo(
-    () => uploads.filter(u => (u.category || 'Highlights') === activeCategory),
+    () => uploads.filter(u => (u.category || DEFAULT_CATEGORY) === activeCategory),
     [uploads, activeCategory]
   );
 
@@ -220,19 +255,41 @@ const EventGallery = () => {
           .masonry { column-count: 2; column-gap: 8px; }
           .masonry-item { break-inside: avoid; margin-bottom: 8px; }
           @media (min-width: 1024px) { .masonry { column-count: 4; column-gap: 12px; } .masonry-item { margin-bottom: 12px; } }
-          .hero-grid { display: grid; grid-template-rows: 1fr auto; height: 100vh; }
+
+          /* Altura exacta de pantalla para móviles: usar dvh/svh con fallback a vh */
+          .hero-grid { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; height: 100vh; }
+          @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
+          @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
+
           .hero-bg { position: relative; overflow: hidden; }
-          .hero-bg img { width: 100%; height: 100%; object-fit: cover; filter: blur(2px); transform: scale(1.05); }
+          .hero-bg img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.05); transition: filter .5s ease, opacity .4s ease; filter: blur(6px); opacity: .85; }
+          .hero-bg img.loaded { filter: blur(0); opacity: 1; }
+
           .hero-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
           .initials-circle { width: clamp(120px, 22vw, 200px); height: clamp(120px, 22vw, 200px); border-radius: 9999px; display: flex; align-items: center; justify-content: center; background: transparent; backdrop-filter: none; border: 3px solid rgba(255,255,255,.55); box-shadow: 0 8px 30px rgba(0,0,0,.25); }
           .initials-circle span{ font-family: 'Lato', sans-serif; font-weight: 800; font-size: clamp(28px, 6vw, 48px); color: #fff; letter-spacing: .04em; white-space: nowrap; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
           .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
+
+          /* Micro-animación del chevron */
+          @keyframes nudge {
+            0% { transform: translateY(0); opacity: .9; }
+            50% { transform: translateY(4px); opacity: 1; }
+            100% { transform: translateY(0); opacity: .9; }
+          }
+          .chevron-anim { animation: nudge 1.6s ease-in-out infinite; }
         `}
       </style>
 
       <section className="hero-grid">
         <div className="hero-bg">
-          <img src={coverUrl} alt="Portada del evento" />
+          <img
+            src={coverUrl}
+            alt="Portada del evento"
+            decoding="async"
+            fetchpriority="high"
+            className={heroLoaded ? 'loaded' : ''}
+            onLoad={() => setHeroLoaded(true)}
+          />
           <div className="hero-overlay" />
           {hostsText && (
             <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none" aria-label={`Iniciales de ${hostsText}`}>
@@ -242,8 +299,12 @@ const EventGallery = () => {
             </div>
           )}
           <div className="absolute z-10 bottom-6 left-0 right-0 flex justify-center">
-            <Button onClick={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })} className="bg-white/20 hover:bg-white/30 border border-white/40 text-white rounded-full px-6 py-5">
-              Ver galería <ChevronDown className="w-5 h-5 ml-2" />
+            <Button
+              onClick={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })}
+              className="bg-white/20 hover:bg-white/30 border border-white/40 text-white rounded-full px-6 py-5"
+              aria-label="Saltar a la galería"
+            >
+              Ver galería <ChevronDown className="w-5 h-5 ml-2 chevron-anim" />
             </Button>
           </div>
         </div>
@@ -264,13 +325,28 @@ const EventGallery = () => {
                 )}
               </div>
               <nav className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={handleDownloadRequest}>
+                <Button
+                  variant="ghost" size="icon"
+                  className="rounded-full hover:bg-black/5"
+                  onClick={handleDownloadRequest}
+                  aria-label="Descargar galería completa"
+                >
                   <Download className="w-5 h-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={handleShare}>
+                <Button
+                  variant="ghost" size="icon"
+                  className="rounded-full hover:bg-black/5"
+                  onClick={handleShare}
+                  aria-label="Compartir enlace de la galería"
+                >
                   <Share2 className="w-5 h-5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="rounded-full hover:bg-black/5" onClick={openSlideshow}>
+                <Button
+                  variant="ghost" size="icon"
+                  className="rounded-full hover:bg-black/5"
+                  onClick={openSlideshow}
+                  aria-label="Reproducir presentación"
+                >
                   <Play className="w-5 h-5" />
                 </Button>
               </nav>
@@ -279,13 +355,21 @@ const EventGallery = () => {
         </div>
       </section>
 
-      <section className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10">
+      {/* Sentinel para detectar sticky activo */}
+      <div ref={stickySentinelRef} />
+
+      <section className={`sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10 ${stickyShadow ? 'shadow-sm' : ''}`}>
         <div className="max-w-[1400px] mx-auto px-4">
           <div className="w-full overflow-x-auto">
             <ul className="flex gap-6 text-sm md:text-base font-lato">
               {categories.map(cat => (
                 <li key={cat}>
-                  <button onClick={() => setActiveCategory(cat)} className={`relative py-3 inline-block ${cat === activeCategory ? 'text-black' : 'text-black/60 hover:text-black'}`}>
+                  <button
+                    onClick={() => setActiveCategory(cat)}
+                    className={`relative py-3 inline-block ${cat === activeCategory ? 'text-black' : 'text-black/60 hover:text-black'}`}
+                    aria-current={cat === activeCategory ? 'page' : undefined}
+                    aria-label={`Ver categoría ${cat}`}
+                  >
                     {cat}
                     <span className={`absolute left-0 right-0 bottom-0 h-[2px] ${cat === activeCategory ? 'bg-black' : 'bg-transparent'}`} />
                   </button>
@@ -307,7 +391,10 @@ const EventGallery = () => {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.35 }}
                 className="masonry-item cursor-pointer"
-                onClick={() => setSelectedMediaIndex(idx)}
+                onClick={() => {
+                  lastActiveElRef.current = document.activeElement;
+                  setSelectedMediaIndex(idx);
+                }}
                 title={upload.title || ''}
               >
                 {upload.type === 'video'
@@ -320,7 +407,13 @@ const EventGallery = () => {
                     </div>
                   )
                   : (
-                    <img src={upload.file_url} alt={upload.title || 'Foto del evento'} className="w-full h-auto select-none" loading="lazy" />
+                    <img
+                      src={upload.file_url}
+                      alt={upload.title || 'Foto del evento'}
+                      className="w-full h-auto select-none"
+                      loading="lazy"
+                      decoding="async"
+                    />
                   )}
               </motion.div>
             ))}
@@ -345,9 +438,17 @@ const EventGallery = () => {
             event={event}
             uploads={filteredUploads}
             startIndex={selectedMediaIndex}
-            onClose={() => { setSelectedMediaIndex(null); setIsSlideshow(false); }}
+            onClose={() => {
+              setSelectedMediaIndex(null);
+              setIsSlideshow(false);
+              // devolver foco
+              if (lastActiveElRef.current && lastActiveElRef.current.focus) {
+                try { lastActiveElRef.current.focus(); } catch {}
+              }
+            }}
             isSlideshow={isSlideshow}
             setIsSlideshow={setIsSlideshow}
+            closeBtnRef={closeBtnRef}
           />
         )}
       </AnimatePresence>
@@ -373,9 +474,21 @@ const EventGallery = () => {
   );
 };
 
-const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSlideshow }) => {
+const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSlideshow, closeBtnRef }) => {
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [isPlaying, setIsPlaying] = useState(isSlideshow);
+
+  // Prefetch next/prev para imágenes
+  useEffect(() => {
+    const preload = (i) => {
+      const u = uploads[i];
+      if (!u || u.type === 'video') return;
+      const img = new Image();
+      img.src = u.file_url;
+    };
+    preload((currentIndex + 1) % uploads.length);
+    preload((currentIndex - 1 + uploads.length) % uploads.length);
+  }, [currentIndex, uploads]);
 
   const goToNext = useCallback(() => setCurrentIndex(prev => (prev + 1) % uploads.length), [uploads.length]);
   const goToPrev = useCallback(() => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length), [uploads.length]);
@@ -385,6 +498,20 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
     if (isPlaying && isSlideshow) slideshowInterval = setInterval(goToNext, 3000);
     return () => clearInterval(slideshowInterval);
   }, [isPlaying, isSlideshow, goToNext]);
+
+  // Accesibilidad: key bindings y foco inicial
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+      else if (e.key === 'ArrowRight') { e.preventDefault(); goToNext(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrev(); }
+      else if (e.key === ' ') { e.preventDefault(); setIsPlaying(p => !p); setIsSlideshow(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    // Foco en el botón de cerrar al abrir
+    closeBtnRef?.current?.focus?.();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [goToNext, goToPrev, onClose, setIsSlideshow, closeBtnRef]);
 
   const currentMedia = uploads[currentIndex];
   if (!currentMedia) return null;
@@ -399,20 +526,89 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center" onClick={onClose}>
-      <div className="absolute top-0 right-0 p-4 flex items-center gap-2 z-10">
-        {isSlideshow && <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying); }}>{isPlaying ? <Pause /> : <Play />}</Button>}
-        {event?.settings?.allowDownloads && <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={handleDownload}><Download /></Button>}
-        <Button variant="ghost" size="icon" className="text-black hover:bg-black/10 rounded-full" onClick={(e) => { e.stopPropagation(); onClose(); }}><X /></Button>
+    <motion.div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Visor de imágenes"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
+      onClick={onClose}
+    >
+      {/* Anuncio de estado (accesibilidad) */}
+      <div className="sr-only" aria-live="polite">
+        {`Mostrando elemento ${currentIndex + 1} de ${uploads.length}`}
       </div>
+
+      <div className="absolute top-0 right-0 p-4 flex items-center gap-2 z-10">
+        {isSlideshow && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-black hover:bg-black/10 rounded-full"
+            onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying); }}
+            aria-label={isPlaying ? 'Pausar presentación' : 'Reproducir presentación'}
+          >
+            {isPlaying ? <Pause /> : <Play />}
+          </Button>
+        )}
+        {event?.settings?.allowDownloads && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-black hover:bg-black/10 rounded-full"
+            onClick={handleDownload}
+            aria-label="Descargar archivo actual"
+          >
+            <Download />
+          </Button>
+        )}
+        <Button
+          ref={closeBtnRef}
+          variant="ghost"
+          size="icon"
+          className="text-black hover:bg-black/10 rounded-full"
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          aria-label="Cerrar visor"
+        >
+          <X />
+        </Button>
+      </div>
+
       <div className="relative w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
-        <Button variant="ghost" size="icon" className="absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12" onClick={goToPrev}><ArrowLeft /></Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+          onClick={goToPrev}
+          aria-label="Anterior"
+        >
+          <ArrowLeft />
+        </Button>
         <AnimatePresence mode="wait">
-          <motion.div key={currentIndex} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.25 }} className="flex items-center justify-center">
-            {currentMedia.type === 'video' ? <video src={currentMedia.file_url} controls autoPlay className="lightbox-media" /> : <img src={currentMedia.file_url} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" />}
+          <motion.div
+            key={currentIndex}
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.25 }}
+            className="flex items-center justify-center"
+          >
+            {currentMedia.type === 'video'
+              ? <video src={currentMedia.file_url} controls autoPlay className="lightbox-media" />
+              : <img src={currentMedia.file_url} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" decoding="async" />}
           </motion.div>
         </AnimatePresence>
-        <Button variant="ghost" size="icon" className="absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12" onClick={goToNext}><ArrowRight /></Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+          onClick={goToNext}
+          aria-label="Siguiente"
+        >
+          <ArrowRight />
+        </Button>
       </div>
     </motion.div>
   );
