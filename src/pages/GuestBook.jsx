@@ -43,7 +43,7 @@ const GuestBook = () => {
   const [recorder, setRecorder] = useState(null);
   const chunksRef = useRef([]);
   const [previewUrl, setPreviewUrl] = useState('');
-  const [videoBlob, setVideoBlob] = useState(null); // Blob cuando grabamos con MediaRecorder
+  const [videoBlob, setVideoBlob] = useState(null); // Blob cuando grabamos con MediaRecorder o archivo nativo
   const fileInputRef = useRef(null); // fallback para captura nativa (móvil)
   const [uploadingVideo, setUploadingVideo] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -179,7 +179,7 @@ const GuestBook = () => {
       const now = new Date();
       const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
       const rand = Math.random().toString(36).slice(2, 8);
-      const baseName = `${DEFAULT_TITLE_PREFIX} ${guestName || 'Invitado'}`.trim().replace(/\s+/g, '-');
+      const baseName = `${DEFAULT_TITLE_PREFIX} ${guestName || 'Invitado'}`.trim().replace(/ +/g, '-');
       const ext = (videoBlob.type.includes('mp4') ? 'mp4' : 'webm');
       const safeName = `${baseName}.${ext}`.toLowerCase().replace(/[^a-z0-9._-]/g, '_');
       const filePath = `${eventId}/saludos/${stamp}_${rand}_${safeName}`;
@@ -211,7 +211,22 @@ const GuestBook = () => {
       const { error: dbError } = await supabase.from('uploads').insert([row]);
       if (dbError) throw dbError;
 
-      toast({ title: '¡Video enviado!', description: 'Tu saludo aparecerá en la galería.' });
+      // También crear una entrada en guestbook_messages con link al video
+      const messagePayload = {
+        event_id: eventId,
+        guest_name: guestName || null,
+        type: 'video',
+        content: urlData.publicUrl,
+      };
+      const { data: msgData, error: msgError } = await supabase
+        .from('guestbook_messages')
+        .insert(messagePayload)
+        .select()
+        .single();
+      if (msgError) throw msgError;
+      setMessages(prev => [msgData, ...prev]);
+
+      toast({ title: '¡Video enviado!', description: 'Tu saludo aparecerá en la galería y en el libro de visitas.' });
       // Reset estados
       discardRecording();
     } catch (err) {
@@ -332,7 +347,7 @@ const GuestBook = () => {
                   {/* Controles de grabación */}
                   <div className="flex flex-wrap gap-2">
                     {!recording && !previewUrl && (
-                      <Button onClick={startRecording} className="bg-gray-900 hover:bg-black text-white">
+                      <Button onClick={startRecording} className="bg-gray-900 hover:bg:black text-white">
                         <Mic className="w-4 h-4 mr-2" /> Iniciar grabación
                       </Button>
                     )}
@@ -423,7 +438,14 @@ const GuestBook = () => {
                           <span>{new Date(message.created_at).toLocaleDateString('es-ES')}</span>
                         </div>
                       </div>
-                      <p className="text-gray-800 leading-relaxed">{message.content}</p>
+
+                      {message.type === 'video' ? (
+                        <a href={message.content} target="_blank" rel="noreferrer" className="text-gray-700 underline break-all">
+                          Ver video mensaje
+                        </a>
+                      ) : (
+                        <p className="text-gray-800 leading-relaxed">{message.content}</p>
+                      )}
                     </motion.div>
                   ))
                 )}
