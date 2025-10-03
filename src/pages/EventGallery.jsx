@@ -19,10 +19,11 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 
 const DEFAULT_CATEGORY = 'Más momentos';
 
+// Categorías únicas, ordenadas alfabéticamente (normalizando a DEFAULT_CATEGORY)
 const useCategories = (uploads) => useMemo(() => {
   const set = new Set();
-  uploads.forEach(u => set.add((u.category || DEFAULT_CATEGORY).trim()));
-  return Array.from(set);
+  uploads.forEach(u => set.add(((u.category || DEFAULT_CATEGORY) + '').trim()));
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 }, [uploads]);
 
 const isLandscapeViewport = () => window.innerWidth >= window.innerHeight;
@@ -43,6 +44,8 @@ const loadImageSize = (src) =>
     img.src = src;
   });
 
+const slugCat = (s) => (s || DEFAULT_CATEGORY).toLowerCase().replace(/[^a-z0-9]+/gi, '-');
+
 const EventGallery = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -51,6 +54,7 @@ const EventGallery = () => {
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // La barra de categorías es navegación, no filtro.
   const [activeCategory, setActiveCategory] = useState(DEFAULT_CATEGORY);
   const [selectedMediaIndex, setSelectedMediaIndex] = useState(null);
   const [isSlideshow, setIsSlideshow] = useState(false);
@@ -94,7 +98,12 @@ const EventGallery = () => {
 
       if (uploadsError) throw uploadsError;
 
-      setUploads(uploadsData || []);
+      // Normaliza categoría y asegura valor por defecto; dejamos el resto TAL CUAL
+      const normalized = (uploadsData || []).map(u => ({
+        ...u,
+        category: ((u.category || DEFAULT_CATEGORY) + '').trim(),
+      }));
+      setUploads(normalized);
     } catch (error) {
       console.error('Error fetching gallery data:', error);
       toast({
@@ -118,7 +127,6 @@ const EventGallery = () => {
     const candidates = images.length ? images : allUploads; // si no hay fotos, usar videos (mostrar primer frame)
     if (!candidates.length) return event?.cover_image_url || null;
 
-    // Intento rápido: primera que coincida por orientación real
     for (let i = 0; i < Math.min(candidates.length, 12); i++) {
       const u = candidates[i];
       const src = u.file_url;
@@ -130,7 +138,6 @@ const EventGallery = () => {
         }
       }
     }
-    // Fallback: primera imagen o el cover del evento
     return images[0]?.file_url || event?.cover_image_url || candidates[0]?.file_url || null;
   }, [event?.cover_image_url]);
 
@@ -155,18 +162,67 @@ const EventGallery = () => {
     return () => io.disconnect();
   }, []);
 
+  // ---- ORDENACIÓN Y NAVEGACIÓN POR CATEGORÍAS (no filtra, sólo anclas) ----
   const categories = useCategories(uploads);
 
-  useEffect(() => {
-    if (categories.length && !categories.includes(activeCategory)) {
-      setActiveCategory(categories[0]);
-    }
-  }, [categories, activeCategory]);
+  // uploads ordenados por categoría y luego por uploaded_at (y por id como respaldo)
+  const sortedUploads = useMemo(() => {
+    const arr = [...uploads];
+    arr.sort((a, b) => {
+      const ca = ((a.category || DEFAULT_CATEGORY) + '').trim();
+      const cb = ((b.category || DEFAULT_CATEGORY) + '').trim();
+      const byCat = ca.localeCompare(cb, 'es', { sensitivity: 'base' });
+      if (byCat !== 0) return byCat;
+      const ta = a.uploaded_at ? new Date(a.uploaded_at).getTime() : 0;
+      const tb = b.uploaded_at ? new Date(b.uploaded_at).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return (a.id || 0) - (b.id || 0);
+    });
+    return arr;
+  }, [uploads]);
 
-  const filteredUploads = useMemo(
-    () => uploads.filter(u => (u.category || DEFAULT_CATEGORY) === activeCategory),
-    [uploads, activeCategory]
-  );
+  // Índice del primer elemento de cada categoría (para slideshow / fallback)
+  const firstIndexByCategory = useMemo(() => {
+    const map = {};
+    for (let i = 0; i < sortedUploads.length; i++) {
+      const cat = ((sortedUploads[i].category || DEFAULT_CATEGORY) + '').trim();
+      if (map[cat] === undefined) map[cat] = i;
+    }
+    return map;
+  }, [sortedUploads]);
+
+  // Mapa id -> índice global (para abrir visor desde cualquier item)
+  const indexById = useMemo(() => {
+    const m = new Map();
+    sortedUploads.forEach((u, i) => m.set(u.id, i));
+    return m;
+  }, [sortedUploads]);
+
+  // Observer para activar la categoría según el scroll (anclas invisibles)
+  useEffect(() => {
+    if (!categories.length) return;
+    const options = { root: null, rootMargin: '0px 0px -75% 0px', threshold: 0 };
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const cat = entry.target.getAttribute('data-cat');
+          if (cat) setActiveCategory(cat);
+        }
+      });
+    }, options);
+
+    categories.forEach((cat) => {
+      const el = document.getElementById(`cat-${slugCat(cat)}`);
+      if (el) io.observe(el);
+    });
+    return () => io.disconnect();
+  }, [categories]);
+
+  const scrollToCategory = (cat) => {
+    const el = document.getElementById(`cat-${slugCat(cat)}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setActiveCategory(cat);
+  };
 
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -174,11 +230,12 @@ const EventGallery = () => {
   };
 
   const openSlideshow = () => {
-    if (filteredUploads.length === 0) {
+    if (sortedUploads.length === 0) {
       toast({ title: 'Galería vacía', description: 'No hay imágenes para el slideshow.' });
       return;
     }
-    setSelectedMediaIndex(0);
+    const start = firstIndexByCategory[activeCategory] ?? 0;
+    setSelectedMediaIndex(start);
     setIsSlideshow(true);
   };
 
@@ -365,10 +422,10 @@ const EventGallery = () => {
               {categories.map(cat => (
                 <li key={cat}>
                   <button
-                    onClick={() => setActiveCategory(cat)}
+                    onClick={() => scrollToCategory(cat)}
                     className={`relative py-3 inline-block ${cat === activeCategory ? 'text-black' : 'text-black/60 hover:text-black'}`}
                     aria-current={cat === activeCategory ? 'page' : undefined}
-                    aria-label={`Ver categoría ${cat}`}
+                    aria-label={`Ir a categoría ${cat}`}
                   >
                     {cat}
                     <span className={`absolute left-0 right-0 bottom-0 h-[2px] ${cat === activeCategory ? 'bg-black' : 'bg-transparent'}`} />
@@ -384,29 +441,40 @@ const EventGallery = () => {
       <main>
         <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10">
           <div className="masonry">
-            {filteredUploads.map((upload, idx) => (
-              <motion.div
-                key={upload.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.35 }}
-                className="masonry-item cursor-pointer"
-                onClick={() => {
-                  lastActiveElRef.current = document.activeElement;
-                  setSelectedMediaIndex(idx);
-                }}
-                title={upload.title || ''}
-              >
-                {upload.type === 'video'
-                  ? (
+            {/* Anclas invisibles + elementos ordenados por categoría */}
+            {categories.flatMap((cat) => {
+              const items = sortedUploads.filter(u => ((u.category || DEFAULT_CATEGORY) + '').trim() === cat);
+              const anchor = (
+                <div
+                  key={`anchor-${cat}`}
+                  id={`cat-${slugCat(cat)}`}
+                  data-cat={cat}
+                  className="masonry-item"
+                  style={{ height: 0, margin: 0, padding: 0 }}
+                />
+              );
+              const nodes = items.map((upload) => (
+                <motion.div
+                  key={upload.id}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.35 }}
+                  className="masonry-item cursor-pointer"
+                  onClick={() => {
+                    lastActiveElRef.current = document.activeElement;
+                    const idx = indexById.get(upload.id) ?? 0;
+                    setSelectedMediaIndex(idx);
+                  }}
+                  title={upload.title || ''}
+                >
+                  {upload.type === 'video' ? (
                     <div className="relative bg-black">
                       <video src={upload.file_url} className="w-full h-auto" playsInline muted />
                       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <VideoIcon className="w-10 h-10 text-white/90" />
                       </div>
                     </div>
-                  )
-                  : (
+                  ) : (
                     <img
                       src={upload.file_url}
                       alt={upload.title || 'Foto del evento'}
@@ -415,14 +483,17 @@ const EventGallery = () => {
                       decoding="async"
                     />
                   )}
-              </motion.div>
-            ))}
+                </motion.div>
+              ));
+              return [anchor, ...nodes];
+            })}
           </div>
-          {filteredUploads.length === 0 && (
+
+          {sortedUploads.length === 0 && (
             <div className="text-center py-20">
               <ImageIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
               <h3 className="text-2xl font-semibold">Galería vacía</h3>
-              <p className="text-gray-600 mt-2">No hay fotos o videos en esta categoría.</p>
+              <p className="text-gray-600 mt-2">No hay fotos o videos en la galería.</p>
             </div>
           )}
         </section>
@@ -436,12 +507,11 @@ const EventGallery = () => {
         {selectedMediaIndex !== null && (
           <MediaViewer
             event={event}
-            uploads={filteredUploads}
+            uploads={sortedUploads}
             startIndex={selectedMediaIndex}
             onClose={() => {
               setSelectedMediaIndex(null);
               setIsSlideshow(false);
-              // devolver foco
               if (lastActiveElRef.current && lastActiveElRef.current.focus) {
                 try { lastActiveElRef.current.focus(); } catch {}
               }
@@ -508,7 +578,6 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       else if (e.key === ' ') { e.preventDefault(); setIsPlaying(p => !p); setIsSlideshow(true); }
     };
     window.addEventListener('keydown', onKey);
-    // Foco en el botón de cerrar al abrir
     closeBtnRef?.current?.focus?.();
     return () => window.removeEventListener('keydown', onKey);
   }, [goToNext, goToPrev, onClose, setIsSlideshow, closeBtnRef]);
@@ -536,7 +605,6 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
       onClick={onClose}
     >
-      {/* Anuncio de estado (accesibilidad) */}
       <div className="sr-only" aria-live="polite">
         {`Mostrando elemento ${currentIndex + 1} de ${uploads.length}`}
       </div>
