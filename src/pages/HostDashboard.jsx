@@ -80,7 +80,7 @@ const HostDashboard = () => {
   }, [fetchEventData]);
 
   const invitationLink = `${window.location.origin}/invitation/${eventId}`;
-  const galleryUploadLink = `${window.location.origin}/event/${eventId}/upload`;
+  const galleryUploadLink = `${window.location.origin}/event/${eventId}`;
   const findTableLink = `${window.location.origin}/event/${eventId}/find-table`;
 
   const copyLink = (link) => {
