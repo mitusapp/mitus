@@ -1,76 +1,101 @@
 // src/pages/EventLanding.jsx
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Upload, MessageSquare, Eye } from 'lucide-react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { Camera, MessageSquare, Calendar, MapPin, Upload, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 
-/**
- * Requisitos implementados:
- * - QR y links SIEMPRE llegan a esta Landing.
- * - Campo obligatorio: "Ingresa tu nombre (necesario para continuar)".
- * - Al presionar "Subir Fotos y Videos":
- *    → valida nombre
- *    → abre el picker inmediatamente
- *    → tras elegir archivos navega a /event/:id/upload con los archivos en state
- * - Se respeta allowGalleryView para mostrar "Ver galería".
- * - El tipo de archivos aceptados (accept) se arma con allowPhotoUpload/allowVideoUpload (defaults true si faltan).
- */
-
 const EventLanding = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [event, setEvent] = useState(null);
   const [guestName, setGuestName] = useState('');
   const [loading, setLoading] = useState(true);
+
   const fileInputRef = useRef(null);
 
-  // Cargar evento
-  const fetchEvent = useCallback(async () => {
-    setLoading(true);
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('id', eventId)
-      .single();
+  const queryParams = new URLSearchParams(location.search);
+  const actionParam = queryParams.get('action');
 
-    if (error) {
-      console.error(error);
-      toast({ title: 'No se pudo cargar el evento', description: error.message, variant: 'destructive' });
+  const getInitials = (name) => {
+    if (!name) return '?';
+    const parts = name.split(/&|y/i).map((p) => p.trim());
+    if (parts.length > 1) {
+      return `${parts[0][0]} & ${parts[1][0]}`.toUpperCase();
     }
-    setEvent(data || null);
-    setLoading(false);
-  }, [eventId]);
+    return name[0].toUpperCase();
+  };
+
+  // Validación de nombre completo (mínimo dos palabras)
+  const validateFullName = (name) => /^(?=.{3,})(?:[^\s]+\s+){1,}[^\s].*$/.test((name || '').trim());
+
+  const fetchEventData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('id, title, date, location, description, cover_image_url, settings, invitation_details')
+        .eq('id', eventId)
+        .single();
+
+      if (error || !data) {
+        toast({
+          title: 'Evento no encontrado',
+          description: 'El evento que buscas no existe o ha expirado',
+          variant: 'destructive',
+        });
+        navigate('/');
+        return;
+      }
+      setEvent(data);
+    } catch (error) {
+      console.error('Error fetching event data:', error);
+      toast({ title: 'Error al cargar datos', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  }, [eventId, navigate]);
 
   useEffect(() => {
-    fetchEvent();
-    // Prefill nombre si ya existía
-    const cached = localStorage.getItem(`mitus_guest_name_${eventId}`);
-    if (cached) setGuestName(cached);
-  }, [fetchEvent, eventId]);
+    fetchEventData();
+    // Prefill desde session/local storage
+    const stored = sessionStorage.getItem('guestName') || localStorage.getItem(`mitus_guest_name_${eventId}`);
+    if (stored) setGuestName(stored);
+  }, [fetchEventData, eventId]);
 
+  // Accept según settings (defaults a true si faltan)
   const allowPhoto = event?.settings?.allowPhotoUpload ?? true;
   const allowVideo = event?.settings?.allowVideoUpload ?? true;
   const acceptStr = [allowPhoto ? 'image/*' : null, allowVideo ? 'video/*' : null].filter(Boolean).join(',');
 
-  const validateFullName = (name) => {
-    // Mínimo dos palabras
-    return /^(?=.{3,})(?:[^\s]+\s+){1,}[^\s].*$/.test(name.trim());
+  const persistName = (name) => {
+    sessionStorage.setItem('guestName', name);
+    localStorage.setItem(`mitus_guest_name_${eventId}`, name);
   };
 
-  const handleOpenPicker = () => {
+  const ensureNameOrWarn = () => {
     if (!validateFullName(guestName)) {
       toast({
         title: 'Ingresa tu nombre completo',
-        description: 'Este dato es necesario para continuar y asociar tus archivos.',
+        description: 'Este dato es necesario para continuar.',
         variant: 'destructive',
       });
+      return false;
+    }
+    persistName(guestName.trim());
+    return true;
+  };
+
+  const handleOpenPicker = () => {
+    if (!ensureNameOrWarn()) return;
+    if (!acceptStr) {
+      toast({ title: 'Subida deshabilitada', description: 'Este evento no permite subir archivos.', variant: 'destructive' });
       return;
     }
-    localStorage.setItem(`mitus_guest_name_${eventId}`, guestName.trim());
     if (fileInputRef.current) fileInputRef.current.value = '';
     fileInputRef.current?.click();
   };
@@ -78,108 +103,176 @@ const EventLanding = () => {
   const handleFilesChosen = (e) => {
     const files = Array.from(e.target?.files || []);
     if (!files.length) return;
-    // Pasamos archivos y nombre vía state al uploader
     navigate(`/event/${eventId}/upload`, {
       state: {
         preselectedFiles: files,
         guestName: guestName.trim(),
         fromLanding: true,
       },
-      replace: false,
     });
+  };
+
+  const handleGuestAccess = (action) => {
+    // Todos los flujos requieren nombre completo
+    if (!ensureNameOrWarn()) return;
+    if (action === 'upload') {
+      // Abrir picker inmediatamente (no navegar todavía)
+      handleOpenPicker();
+      return;
+    }
+    navigate(`/event/${eventId}/${action}`);
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse text-sm text-muted-foreground">Cargando…</div>
-      </div>
-    );
-  }
-
-  if (!event) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-6 text-center">
-        <div>
-          <div className="text-xl font-semibold mb-2">Evento no encontrado</div>
-          <div className="text-muted-foreground">Verifica el enlace recibido.</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-gray-600 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-400 mx-auto mb-4"></div>
+          <p>Cargando evento...</p>
         </div>
       </div>
     );
   }
 
+  const hosts = event.invitation_details?.hosts?.join(' y ');
+  const eventDate = new Date(event.date.replace(/-/g, '/'));
+  const location_fallback = event.location || event.invitation_details?.locations?.[0]?.address;
+  const defaultAction = actionParam || 'upload';
+
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-3xl mx-auto px-4 py-8">
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-          {/* Portada (simple) */}
-          <div className="aspect-[16/9] w-full rounded-2xl overflow-hidden border bg-muted mb-6">
-            {event.cover_image_url ? (
-              <img src={event.cover_image_url} alt="Portada del evento" className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-sm text-muted-foreground">
-                Sin imagen de portada
+    <div className="min-h-screen py-10 px-6 bg-gray-50">
+      <div className="max-w-2xl mx-auto">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8 }}
+          className="text-center"
+        >
+          {/* Imagen de portada */}
+          <div className="relative mb-10">
+            <div className="aspect-video bg-gradient-to-br from-gray-200 to-gray-100 rounded-2xl border border-gray-200 overflow-hidden">
+              {event.cover_image_url ? (
+                <img
+                  className="w-full h-full object-cover"
+                  alt="Portada del evento"
+                  src={event.cover_image_url}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                  <div className="w-24 h-24 rounded-full border-2 border-gray-400 flex items-center justify-center">
+                    <span className="text-4xl font-bold text-gray-600">
+                      {getInitials(hosts || event.title)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="absolute -bottom-4 left-1/2 transform -translate-x-1/2">
+              <div className="bg-gradient-to-r from-gray-700 to-gray-500 px-6 py-2 rounded-full border-4 border-white shadow-lg">
+                <span className="text-white font-semibold">¡Únete al evento!</span>
               </div>
+            </div>
+          </div>
+
+          {/* Datos del evento */}
+          <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm mb-8">
+            {hosts && (
+              <h2 className="text-2xl text-gray-700 font-serif mb-2">{hosts}</h2>
             )}
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
+              {event.title}
+            </h1>
+
+            <div className="space-y-2 text-gray-600 mb-6">
+              <div className="flex items-center justify-center">
+                <Calendar className="w-5 h-5 mr-2 text-gray-500" />
+                <span>
+                  {eventDate.toLocaleDateString('es-ES', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    timeZone: 'UTC',
+                  })}
+                </span>
+              </div>
+
+              {location_fallback && (
+                <div className="flex items-center justify-center">
+                  <MapPin className="w-5 h-5 mr-2 text-gray-500" />
+                  <span>{location_fallback}</span>
+                </div>
+              )}
+            </div>
+
+            {event.description && (
+              <p className="text-gray-700 leading-relaxed mb-6">{event.description}</p>
+            )}
+
+            {/* Nombre OBLIGATORIO */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-600 mb-3">
+                Ingresa tu nombre (necesario para continuar):
+              </label>
+              <input
+                type="text"
+                value={guestName}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Nombre y apellido"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent text-center"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if ((actionParam || 'upload') === 'upload') handleOpenPicker();
+                    else handleGuestAccess(actionParam);
+                  }
+                }}
+              />
+            </div>
           </div>
 
-          {/* Título / datos básicos */}
-          <div className="text-center space-y-1 mb-8">
-            <h1 className="text-2xl font-bold tracking-tight">{event.title || 'Evento'}</h1>
-            {event.date && <p className="text-sm text-muted-foreground">{new Date(event.date).toLocaleDateString()}</p>}
-            {event.location && <p className="text-sm text-muted-foreground">{event.location}</p>}
-          </div>
-
-          {/* Nombre invitado obligatorio */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">Ingresa tu nombre (necesario para continuar)</label>
-            <input
-              type="text"
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder="Nombre y apellido"
-              className="w-full px-4 py-3 rounded-xl border bg-background"
-            />
-          </div>
-
-          {/* Acciones */}
+          {/* Botones de acción (MISMO DISEÑO) */}
           <div className="space-y-4">
-            <Button onClick={handleOpenPicker} className="w-full py-4 text-base">
+            <Button
+              onClick={() => handleGuestAccess('upload')}
+              className="w-full bg-gradient-to-r from-gray-700 to-gray-500 hover:from-gray-800 hover:to-gray-600 text-white py-4 text-lg rounded-xl shadow-md transform hover:scale-105 transition-all duration-300"
+            >
               <Upload className="w-5 h-5 mr-2" />
               Subir Fotos y Videos
             </Button>
 
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={acceptStr}
-              multiple
-              hidden
-              onChange={handleFilesChosen}
-            />
-
             <Button
-              onClick={() => navigate(`/event/${eventId}/guestbook`)}
+              onClick={() => handleGuestAccess('guestbook')}
               variant="outline"
-              className="w-full py-4 text-base"
+              className="w-full border-gray-300 text-white hover:bg-gray-400 py-4 text-lg rounded-xl"
             >
               <MessageSquare className="w-5 h-5 mr-2" />
-              Dejar mensaje
+              Dejar Mensaje
             </Button>
 
-            {event?.settings?.allowGalleryView !== false && (
+            {event.settings?.allowGalleryView && (
               <Button
-                onClick={() => navigate(`/event/${eventId}/gallery`)}
-                variant="secondary"
-                className="w-full py-4 text-base"
+                onClick={() => handleGuestAccess('gallery')}
+                variant="outline"
+                className="w-full border-gray-300 text-white hover:bg-gray-400 py-4 text-lg rounded-xl"
               >
                 <Eye className="w-5 h-5 mr-2" />
-                Ver galería
+                Ver Galería
               </Button>
             )}
           </div>
         </motion.div>
       </div>
+
+      {/* input file oculto para picker inmediato */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={acceptStr}
+        multiple
+        hidden
+        onChange={handleFilesChosen}
+      />
     </div>
   );
 };
