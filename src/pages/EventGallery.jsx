@@ -546,6 +546,24 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
   const [currentIndex, setCurrentIndex] = useState(startIndex);
   const [isPlaying, setIsPlaying] = useState(isSlideshow);
 
+  // Swipe en móviles
+  const touchStart = useRef({ x: 0, y: 0 });
+  const onTouchStart = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e) => {
+    const t = e.changedTouches?.[0];
+    if (!t) return;
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    const absX = Math.abs(dx), absY = Math.abs(dy);
+    if (absX > 50 && absX > absY) {
+      if (dx < 0) goToNext(); else goToPrev();
+    }
+  };
+
   // Prefetch next/prev para imágenes
   useEffect(() => {
     const preload = (i) => {
@@ -594,6 +612,7 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
   };
 
   const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
+  const displayName = currentMedia.file_name || currentMedia.title || (currentMedia.file_url ? currentMedia.file_url.split('/').pop().split('?')[0] : '');
 
   return (
     <motion.div
@@ -646,11 +665,11 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
         </Button>
       </div>
 
-      <div className="relative w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         <Button
           variant="ghost"
           size="icon"
-          className="absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+          className="hidden sm:inline-flex absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
           onClick={goToPrev}
           aria-label="Anterior"
         >
@@ -673,12 +692,21 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+          className="hidden sm:inline-flex absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
           onClick={goToNext}
           aria-label="Siguiente"
         >
           <ArrowRight />
         </Button>
+
+        {/* Nombre del archivo (parte inferior) */}
+        {displayName && (
+          <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
+            <div className="px-3 py-1 rounded-md text-sm text-black/60 bg-white/70 backdrop-blur-sm">
+              {displayName}
+            </div>
+          </div>
+        )}
       </div>
     </motion.div>
   );
