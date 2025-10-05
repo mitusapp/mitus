@@ -64,7 +64,7 @@ const initialData = {
 };
 
 /* ============================
-   COMPONENTE: UBICACIONES
+   COMPONENTE: UBICACIONES (igual que el original, con estilos claros)
    ============================ */
 const LocationForm = ({ locations, setFormData }) => {
   // predicciones por input (index -> array de predicciones)
@@ -88,28 +88,27 @@ const LocationForm = ({ locations, setFormData }) => {
   };
 
   const handleSelectPrediction = async (index, place) => {
-  const details = await fetchPlaceDetails(place.placeId);
-  if (!details) return;
+    const details = await fetchPlaceDetails(place.placeId);
+    if (!details) return;
 
-  const comps = details.addressComponents || [];
-  const getComp = (type) =>
-    comps.find((c) => c.types?.includes(type))?.longText || "";
+    const comps = details.addressComponents || [];
+    const getComp = (type) =>
+      comps.find((c) => c.types?.includes(type))?.longText || '';
 
-  const newLocations = [...locations];
-  newLocations[index] = {
-    ...newLocations[index],
-    address: details.formattedAddress || "",
-    city: getComp("locality"),
-    state: getComp("administrative_area_level_1"),
-    country: getComp("country"),
-    lat: details.location?.latitude || null,
-    lng: details.location?.longitude || null,
+    const newLocations = [...locations];
+    newLocations[index] = {
+      ...newLocations[index],
+      address: details.formattedAddress || '',
+      city: getComp('locality'),
+      state: getComp('administrative_area_level_1'),
+      country: getComp('country'),
+      lat: details.location?.latitude || null,
+      lng: details.location?.longitude || null,
+    };
+
+    setFormData((prev) => ({ ...prev, locations: newLocations }));
+    setPredictions((prev) => ({ ...prev, [index]: [] })); // cerrar dropdown
   };
-
-  setFormData((prev) => ({ ...prev, locations: newLocations }));
-  setPredictions((prev) => ({ ...prev, [index]: [] })); // cerrar dropdown
-};
-
 
   const addLocation = () => {
     setFormData(prev => ({
@@ -124,36 +123,35 @@ const LocationForm = ({ locations, setFormData }) => {
   return (
     <div className="space-y-4">
       {locations.map((loc, index) => (
-        <div key={index} className="p-4 bg-white/5 rounded-lg border border-white/10 space-y-3 relative">
+        <div key={index} className="p-4 bg-white rounded-xl border border-slate-200 space-y-3 relative">
           <input
             type="text"
             value={loc.title}
             onChange={(e) => handleLocationChange(index, 'title', e.target.value)}
             placeholder="Título (ej: Ceremonia)"
-            className="w-full p-2 bg-white/10 rounded text-white"
+            className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
           <input
             type="time"
             value={loc.time}
             onChange={(e) => handleLocationChange(index, 'time', e.target.value)}
-            className="w-full p-2 bg-white/10 rounded text-white"
-            style={{ colorScheme: 'dark' }}
+            className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
           <input
             type="text"
             value={loc.address}
             onChange={(e) => handleLocationChange(index, 'address', e.target.value)}
             placeholder="Buscar lugar o dirección"
-            className="w-full p-2 bg-white/10 rounded text-white"
+            className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
 
           {/* Dropdown de sugerencias */}
           {predictions[index]?.length > 0 && (
-            <ul className="absolute bg-gray-800 border border-gray-600 rounded mt-1 w-full z-10 max-h-56 overflow-y-auto">
+            <ul className="absolute bg-white border border-slate-200 rounded-xl mt-1 w-full z-10 max-h-56 overflow-y-auto shadow-lg">
               {predictions[index].map((p, i) => (
                 <li
                   key={`${p.placeId}-${i}`}
-                  className="p-2 hover:bg-gray-700 cursor-pointer"
+                  className="px-3 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-700"
                   onClick={() => handleSelectPrediction(index, p)}
                 >
                   {p.mainText} {p.secondaryText && <span className="opacity-70">– {p.secondaryText}</span>}
@@ -164,7 +162,7 @@ const LocationForm = ({ locations, setFormData }) => {
 
           {/* Mapa preview */}
           {loc.lat && loc.lng && (
-            <div className="w-full h-48 rounded overflow-hidden">
+            <div className="w-full h-48 rounded-xl overflow-hidden border border-slate-200">
               <iframe
                 title={`map-${index}`}
                 width="100%"
@@ -182,7 +180,7 @@ const LocationForm = ({ locations, setFormData }) => {
       <Button
         onClick={addLocation}
         variant="outline"
-        className="border-white/30 text-white hover:bg-white/10"
+        className="border-slate-300 text-slate-700 hover:bg-slate-50"
       >
         Añadir otra ubicación
       </Button>
@@ -191,7 +189,7 @@ const LocationForm = ({ locations, setFormData }) => {
 };
 
 /* ============================
-   WIZARD PRINCIPAL
+   WIZARD PRINCIPAL (manteniendo pasos, campos y guardado)
    ============================ */
 const InvitationWizard = () => {
   const navigate = useNavigate();
@@ -260,6 +258,17 @@ const InvitationWizard = () => {
     }
   }, [imagePreview]);
 
+  const shortEventId = () => (
+    crypto?.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase() :
+    Math.random().toString(36).slice(2, 10).toUpperCase()
+  );
+
+  // 💡 Normaliza "hosts" para aceptar string o array (evita error split is not a function)
+  const normalizeHosts = (val) => {
+    if (Array.isArray(val)) return val.map((h) => String(h).trim()).filter(Boolean);
+    return String(val || '').split(/\s*(?:&|y)\s*/i).map((h) => h.trim()).filter(Boolean);
+  };
+
   const saveEvent = async (isUpdate) => {
     if (!user) {
       toast({
@@ -272,15 +281,17 @@ const InvitationWizard = () => {
     setIsSubmitting(true);
 
     try {
-      let cover_image_url =
-        imagePreview && imagePreview.startsWith('https://') ? imagePreview : null;
+      // Generar/usar id antes de subir imagen para carpeta correcta
+      const eventId = isUpdate ? editingEventId : shortEventId();
+
+      let cover_image_url = imagePreview && imagePreview.startsWith('https://') ? imagePreview : null;
 
       if (imagePreview && !imagePreview.startsWith('https://')) {
         const response = await fetch(imagePreview);
         const blob = await response.blob();
         const fileExt = blob.type.split('/')[1] || 'png';
-        const fileName = `${Math.random()}.${fileExt}`;
-        const filePath = `public/${editingEventId || 'new'}/${fileName}`;
+        const fileName = `${Date.now()}.${fileExt}`;
+        const filePath = `public/${eventId}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from('event-covers')
@@ -300,7 +311,7 @@ const InvitationWizard = () => {
         cover_image_url,
         user_id: user.id,
         invitation_details: {
-          hosts: formData.hosts.split(/&|y/i).map((h) => h.trim()),
+          hosts: normalizeHosts(formData.hosts),
           welcome_message: formData.initialMessage,
           invitation_text: formData.invitationMessage,
           event_time: formData.eventTime,
@@ -312,13 +323,12 @@ const InvitationWizard = () => {
       };
 
       let error;
-      let eventId = editingEventId;
+      let finalId = eventId;
 
       if (isUpdate) {
-        ({ error } = await supabase.from('events').update(eventData).eq('id', editingEventId));
+        ({ error } = await supabase.from('events').update({ id: finalId, ...eventData }).eq('id', finalId));
       } else {
-        eventId = Math.random().toString(36).substr(2, 8).toUpperCase();
-        ({ error } = await supabase.from('events').insert({ ...eventData, id: eventId }));
+        ({ error } = await supabase.from('events').insert({ id: finalId, ...eventData }));
       }
 
       if (error) throw error;
@@ -333,7 +343,7 @@ const InvitationWizard = () => {
         description: 'Tu evento ha sido guardado.',
       });
 
-      return eventId;
+      return finalId;
     } catch (err) {
       console.error('Error saving event:', err);
       toast({ title: 'Error al guardar evento', description: err.message, variant: 'destructive' });
@@ -372,23 +382,23 @@ const InvitationWizard = () => {
     }
   };
 
-  const handleSaveAndContinue = async () => {
-    const id = await saveEvent(true);
-    if (id) nextStep();
-  };
-
+  // En edición: guardar y volver
   const handleSaveAndExit = async () => {
     const id = await saveEvent(true);
-    if (id) navigate(`/host/${id}`);
+    if (id) navigate(-1);
   };
 
+  // En creación, se mantiene el flujo original
   const finishWizard = async () => {
     if (editingEventId) {
       const id = await saveEvent(true);
       if (id) navigate(`/host/${id}`);
     } else {
-      toast({ title: '¡Vista previa lista!', description: 'Revisa tu invitación.' });
-      navigate('/preview');
+      const id = await saveEvent(false);
+      if (id) {
+        toast({ title: '¡Vista previa lista!', description: 'Revisa tu invitación.' });
+        navigate('/preview');
+      }
     }
   };
 
@@ -406,12 +416,12 @@ const InvitationWizard = () => {
                   setFormData((p) => ({ ...p, eventType: type.key }));
                   nextStep();
                 }}
-                className={`bg-white/5 rounded-2xl p-6 border-2 ${
-                  formData.eventType === type.key ? 'border-purple-500' : 'border-white/20'
-                } text-center cursor-pointer`}
+                className={`rounded-2xl p-6 border-2 text-center cursor-pointer transition ${
+                  formData.eventType === type.key ? 'border-violet-500 bg-violet-50' : 'border-slate-200 bg-white hover:bg-slate-50'
+                }`}
               >
-                <div className="text-purple-300 mb-4">{type.icon}</div>
-                <h3 className="text-xl text-white">{type.name}</h3>
+                <div className="text-violet-600 mb-4">{type.icon}</div>
+                <h3 className="text-base font-medium text-slate-800">{type.name}</h3>
               </motion.div>
             ))}
           </div>
@@ -425,7 +435,7 @@ const InvitationWizard = () => {
               value={formData.hosts}
               onChange={handleInputChange}
               placeholder="Nombres anfitriones"
-              className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white"
+              className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
             />
             <input
               type="text"
@@ -433,7 +443,7 @@ const InvitationWizard = () => {
               value={formData.eventName}
               onChange={handleInputChange}
               placeholder="Nombre del evento"
-              className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white"
+              className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
             />
           </div>
         );
@@ -444,7 +454,7 @@ const InvitationWizard = () => {
             value={formData.initialMessage}
             onChange={handleInputChange}
             placeholder="Mensaje inicial"
-            className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white h-32"
+            className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 h-32 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
         );
       case 4:
@@ -454,7 +464,7 @@ const InvitationWizard = () => {
             value={formData.invitationMessage}
             onChange={handleInputChange}
             placeholder="Texto invitación"
-            className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white h-40"
+            className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 h-40 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
         );
       case 5:
@@ -465,16 +475,14 @@ const InvitationWizard = () => {
               name="eventDate"
               value={formData.eventDate}
               onChange={handleInputChange}
-              className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white"
-              style={{ colorScheme: 'dark' }}
+              className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
             />
             <input
               type="time"
               name="eventTime"
               value={formData.eventTime}
               onChange={handleInputChange}
-              className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white"
-              style={{ colorScheme: 'dark' }}
+              className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
             />
           </div>
         );
@@ -490,13 +498,13 @@ const InvitationWizard = () => {
                 value={ind}
                 onChange={(e) => handleIndicationChange(i, e)}
                 placeholder="Indicación"
-                className="w-full p-2 bg-white/10 rounded-lg text-white"
+                className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
               />
             ))}
             <Button
               onClick={addIndication}
               variant="outline"
-              className="border-white/30 text-white hover:bg-white/10"
+              className="border-slate-300 text-slate-700 hover:bg-slate-50"
             >
               Añadir indicación
             </Button>
@@ -509,7 +517,7 @@ const InvitationWizard = () => {
               type="file"
               accept="image/*"
               onChange={handleImageChange}
-              className="w-full p-3 bg-white/10 border-white/20 rounded-lg text-white"
+              className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900"
             />
             {imagePreview && (
               <img src={imagePreview} alt="Vista previa" className="mt-4 rounded-lg max-h-60 mx-auto" />
@@ -524,11 +532,11 @@ const InvitationWizard = () => {
                 key={t.id}
                 onClick={() => setFormData((p) => ({ ...p, template: t.id }))}
                 className={`rounded-lg overflow-hidden border-4 ${
-                  formData.template === t.id ? 'border-purple-500' : 'border-transparent'
-                } cursor-pointer`}
+                  formData.template === t.id ? 'border-violet-500' : 'border-transparent'
+                } cursor-pointer bg-white shadow-sm`}
               >
                 <img src={t.img} alt={t.name} className="w-full h-40 object-cover" />
-                <p className="text-center p-2 bg-white/10 text-white">{t.name}</p>
+                <p className="text-center p-2 text-slate-800">{t.name}</p>
               </div>
             ))}
           </div>
@@ -539,28 +547,30 @@ const InvitationWizard = () => {
   };
 
   return (
-    <div className="min-h-screen py-8 px-4 text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-900 py-8 px-4">
       <div className="max-w-4xl mx-auto">
+        {/* Header */}
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">{editingEventId ? 'Editar Invitación' : 'Crea tu Invitación'}</h1>
+          <h1 className="text-3xl font-bold text-slate-900">{editingEventId ? 'Editar Invitación' : 'Crea tu Invitación'}</h1>
           <Button
             onClick={() => navigate(editingEventId ? `/host/${editingEventId}` : '/')}
             variant="ghost"
             size="icon"
-            className="text-white hover:bg-white/10"
+            className="text-slate-700 hover:bg-slate-100"
           >
             <Home />
           </Button>
         </div>
 
+        {/* Stepper */}
         <div className="flex justify-center mb-8 space-x-2 md:space-x-4">
           {wizardSteps.map((s) => (
             <div
               key={s.id}
               onClick={() => updateStep(s.id)}
               title={s.title}
-              className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full border-2 cursor-pointer transition-all duration-300 hover:scale-110 hover:border-purple-400 ${
-                step >= s.id ? 'bg-purple-600 border-purple-600' : 'bg-gray-700/50 border-gray-500'
+              className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full border-2 cursor-pointer transition-all duration-300 hover:scale-110 ${
+                step >= s.id ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-300 text-slate-500'
               }`}
             >
               {React.cloneElement(s.icon, { className: 'w-4 h-4 md:w-5 md:h-5' })}
@@ -568,8 +578,9 @@ const InvitationWizard = () => {
           ))}
         </div>
 
-        <div className="bg-white/5 rounded-2xl p-6 border border-white/20 min-h-[300px]">
-          <h2 className="text-xl font-semibold text-white mb-4">{wizardSteps[step - 1].title}</h2>
+        {/* Card */}
+        <div className="rounded-2xl p-6 border border-slate-200 bg-white min-h-[300px] shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900 mb-4">{wizardSteps[step - 1].title}</h2>
           <AnimatePresence mode="wait">
             <motion.div
               key={step}
@@ -583,52 +594,33 @@ const InvitationWizard = () => {
           </AnimatePresence>
         </div>
 
+        {/* Footer */}
         <div className="flex justify-between mt-8">
           <Button
             onClick={prevStep}
             disabled={step === 1}
             variant="outline"
-            className="border-white/30 text-white hover:bg-white/10 disabled:opacity-50"
+            className="border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             <ArrowLeft className="mr-2" /> Anterior
           </Button>
 
           {editingEventId ? (
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSaveAndExit}
-                className="bg-green-600 hover:bg-green-700"
-                disabled={isSubmitting}
-              >
-                <Save className="mr-2 h-4 w-4" /> Guardar y Salir
-              </Button>
-
-              {step < wizardSteps.length ? (
-                <Button
-                  onClick={handleSaveAndContinue}
-                  className="bg-purple-600 hover:bg-purple-700"
-                  disabled={isSubmitting}
-                >
-                  Guardar y Continuar <ArrowRight className="ml-2" />
-                </Button>
-              ) : (
-                <Button
-                  onClick={finishWizard}
-                  className="bg-green-600 hover:bg-green-700"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? 'Guardando...' : 'Finalizar Edición'}
-                </Button>
-              )}
-            </div>
+            <Button
+              onClick={handleSaveAndExit}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              disabled={isSubmitting}
+            >
+              <Save className="mr-2 h-4 w-4" /> Guardar cambios
+            </Button>
           ) : step < wizardSteps.length ? (
-            <Button onClick={nextStep} className="bg-purple-600 hover:bg-purple-700">
+            <Button onClick={() => updateStep(step + 1)} className="bg-violet-600 hover:bg-violet-700 text-white">
               Siguiente <ArrowRight className="ml-2" />
             </Button>
           ) : (
             <Button
               onClick={finishWizard}
-              className="bg-green-600 hover:bg-green-700"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
               disabled={isSubmitting}
             >
               {isSubmitting ? 'Guardando...' : 'Finalizar y Ver Previa'}
