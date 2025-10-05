@@ -1,4 +1,4 @@
-
+// src/App.jsx
 import React, { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
@@ -48,10 +48,12 @@ function App() {
     <>
       <Helmet>
         <title>Mitus - Invitaciones y Álbumes Digitales para Eventos</title>
-        <meta name="description" content="Crea invitaciones y álbumes digitales para bodas, quinceaños y eventos. Los invitados confirman asistencia y suben fotos al instante." />
+        <meta
+          name="description"
+          content="Crea invitaciones y álbumes digitales para bodas, quinceaños y eventos. Los invitados confirman asistencia y suben fotos al instante."
+        />
       </Helmet>
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-
         <Suspense fallback={<LoadingSpinner />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -60,10 +62,10 @@ function App() {
             <Route path="/signup-confirm" element={<SignUpConfirmPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/update-password" element={<UpdatePasswordPage />} />
-            
+
             <Route path="/wizard" element={<PrivateRoute><InvitationWizard /></PrivateRoute>} />
             <Route path="/preview" element={<PrivateRoute><InvitationPreview /></PrivateRoute>} />
-            
+
             <Route path="/create-event" element={<Navigate to="/wizard" replace />} />
 
             <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
@@ -90,7 +92,7 @@ function App() {
             <Route path="/host/:eventId/planner/inspiration" element={<PrivateRoute><PlannerInspiration /></PrivateRoute>} />
 
             <Route path="/event/:eventId" element={<EventLanding />} />
-            <Route path="/invitation/:eventId" anfitriones element={<InvitationPage />} />
+            <Route path="/invitation/:eventId" element={<InvitationPage />} />
             <Route path="/event/:eventId/upload" element={<GuestUpload />} />
             <Route path="/event/:eventId/gallery" element={<EventGallery />} />
             <Route path="/event/:eventId/guestbook" element={<GuestBook />} />
