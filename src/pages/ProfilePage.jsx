@@ -188,7 +188,7 @@ const ProfilePage = () => {
                 />
                 <Label htmlFor="dev-helper-switch" className="text-[#1E1E1E]">Mostrar ruta</Label>
               </div>
-              <Button onClick={() => navigate('/settings')} variant="outline" className="border-[#DCD9D6] text-[#1E1E1E] hover:bg-[#F8F3F2]">
+              <Button onClick={() => navigate('/settings')} variant="outline" className="border-[#DCD9D6] text-[#DCD9D6] hover:bg-[#F8F3F2]">
                 <Settings className="w-4 h-4 mr-2" />
                 Configuraciones
               </Button>

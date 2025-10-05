@@ -1,13 +1,20 @@
-
+// src/pages/LoginPage.jsx
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { LogIn, Mail, Lock } from 'lucide-react';
+import { SiApple } from 'react-icons/si';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 
-const GoogleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M21.35,11.1H12.18V13.83H18.69C18.36,17.64 15.19,19.27 12.19,19.27C8.36,19.27 5,16.25 5,12C5,7.9 8.2,4.73 12.19,4.73C15.29,4.73 17.1,6.7 17.1,6.7L19,4.72C19,4.72 16.56,2 12.19,2C6.42,2 2.03,6.8 2.03,12C2.03,17.05 6.16,22 12.19,22C17.6,22 21.5,18.33 21.5,12.33C21.5,11.76 21.45,11.43 21.35,11.1Z"></path></svg>;
-const AppleIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M19.2,12.89c-1.21,0-2.33.69-2.9,1.82-.55,1.12-.7,2.39,0,3.68,1.13,2.07,3.25,4.18,5.7,4.18,0,0,.06-1.11,.06-2.24,0-2.6-1.45-3.94-3.02-3.94s-2.21,1.19-2.21,1.19c.11-1.18,.75-2.33,2.06-2.33s1.68,.8,2.33,.8c0,0-.2-1.18-1.02-2.16Z M15.53,11.3c.25-1.53.31-3.2,0-4.15-1.13-1.3-2.6-1.48-3.32-1.53-.92,0-2.36,.14-3.48,1.3-1.3,1.3-2.06,3.31-1.88,5.1,1.06,0,2.21-.69,3.31-.69s2.21,.69,3.06,.69c.86,0,2.06-.75,2.06-.75Z"></path></svg>;
+const GoogleIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 533.5 544.3" aria-hidden="true">
+    <path fill="#4285F4" d="M533.5 278.4c0-18.4-1.6-36.1-4.7-53.2H272.1v100.9h146.9c-6.4 34.5-26 63.7-55.4 83.2v68h89.6c52.4-48.3 80.3-119.6 80.3-198.9z"/>
+    <path fill="#34A853" d="M272.1 544.3c73.7 0 135.6-24.4 180.8-66.1l-89.6-68c-24.9 16.7-56.8 26.6-91.1 26.6-70 0-129.3-47.3-150.6-110.9H30.3v69.6c45 88.9 136.9 148.8 241.8 148.8z"/>
+    <path fill="#FBBC05" d="M121.5 325.9c-10.2-30.5-10.2-63.4 0-94l.1-69.5H30.3c-40.8 81.4-40.8 176.2 0 257.6l91.1-69.6z"/>
+    <path fill="#EA4335" d="M272.1 106.4c39.9-.6 78.1 14 107.4 41.4l80.3-80.3C412.9 25.2 348.8-.1 272.1 0 167.2 0 75.3 59.9 30.3 148.8l91.1 69.6C142.7 154.8 202.1 107.5 272.1 106.4z"/>
+  </svg>
+);
 
 const LoginPage = () => {
   const { signIn, signInWithProvider } = useAuth();
@@ -29,93 +36,105 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <motion.div
-        initial={{ opacity: 0, y: -20 }}
+        initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="max-w-md w-full space-y-8 bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 shadow-2xl"
+        transition={{ duration: 0.4 }}
+        className="w-full max-w-md"
       >
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
-            Inicia sesión en tu cuenta
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-300">
-            o{' '}
-            <Link to="/signup" className="font-medium text-purple-400 hover:text-purple-300">
-              crea una cuenta nueva
-            </Link>
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => handleOAuthSignIn('google')} disabled={loading}>
-            <GoogleIcon /> <span className="ml-2">Google</span>
-          </Button>
-          <Button variant="outline" className="bg-white/10 border-white/20 text-white hover:bg-white/20" onClick={() => handleOAuthSignIn('apple')} disabled={loading}>
-            <AppleIcon /> <span className="ml-2">Apple</span>
-          </Button>
-        </div>
-
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-white/20" />
+        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
+          <div className="text-center">
+            <h1 className="text-2xl font-semibold text-slate-900">Inicia sesión en tu cuenta</h1>
+            <p className="mt-2 text-sm text-slate-600">
+              o{' '}
+              <Link to="/signup" className="font-medium text-purple-600 hover:text-purple-700">
+                crea una cuenta nueva
+              </Link>
+            </p>
           </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-slate-800 text-gray-400">O continúa con</span>
-          </div>
-        </div>
 
-        <form className="space-y-6" onSubmit={handleLogin}>
-          <div className="space-y-4">
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                id="email-address"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 placeholder-gray-400 text-white focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm"
-                placeholder="Correo electrónico"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+          <div className="grid grid-cols-2 gap-3 mt-6">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
+              onClick={() => handleOAuthSignIn('google')}
+              disabled={loading}
+            >
+              <GoogleIcon />
+              <span className="ml-2">Google</span>
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
+              onClick={() => handleOAuthSignIn('apple')}
+              disabled={loading}
+            >
+              <SiApple className="w-5 h-5" aria-hidden="true" />
+              <span className="ml-2">Apple</span>
+            </Button>
+          </div>
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200" />
             </div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 placeholder-gray-400 text-white focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm"
-                placeholder="Contraseña"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="px-2 bg-white text-slate-500">o continúa con</span>
             </div>
           </div>
 
-          <div className="flex items-center justify-end">
-            <div className="text-sm">
-              <Link to="/forgot-password" className="font-medium text-purple-400 hover:text-purple-300">
+          <form className="space-y-5" onSubmit={handleLogin}>
+            <div className="space-y-4">
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  id="email-address"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  className="appearance-none rounded-xl w-full pl-10 pr-3 py-3 bg-white border border-slate-300 placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
+                  placeholder="Correo electrónico"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  className="appearance-none rounded-xl w-full pl-10 pr-3 py-3 bg-white border border-slate-300 placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
+                  placeholder="Contraseña"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <Link to="/forgot-password" className="text-sm font-medium text-purple-600 hover:text-purple-700">
                 ¿Olvidaste tu contraseña?
               </Link>
             </div>
-          </div>
 
-          <div>
             <Button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+              className="h-11 w-full text-white bg-purple-600 hover:bg-purple-700 rounded-xl"
             >
-              {loading ? 'Iniciando...' : <><LogIn className="w-5 h-5 mr-2" /> Iniciar Sesión</>}
+              {loading ? 'Iniciando…' : (<><LogIn className="w-5 h-5 mr-2" /> Iniciar Sesión</>)}
             </Button>
-          </div>
-        </form>
+          </form>
+        </div>
       </motion.div>
     </div>
   );
