@@ -91,8 +91,8 @@ const HomePage = () => {
             </h1>
             
             <p className="text-xl md:text-2xl text-white mb-8 max-w-3xl mx-auto leading-relaxed drop-shadow">
-              Una plataforma exclusiva para crear y vivir experiencias memorables. 
-              <span className="text-[#B9A7F9] font-semibold"> Invitaciones digitales y álbumes de fotos</span> en un solo lugar.
+              Una plataforma exclusiva para planificar tus eventos y crear experiencias memorables. 
+              <span className="text-[#B9A7F9] font-semibold"> Gestión de invitados, invitaciones digitales, álbumes de fotos y mucho más</span> en un solo lugar.
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">

@@ -1,5 +1,5 @@
 /* eslint-disable react/no-unknown-property */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -8,6 +8,7 @@ import {
   Home, Save
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -58,56 +59,116 @@ const initialData = {
     country: '',
     lat: null,
     lng: null,
+    placeId: undefined,
   }],
   indications: [''],
   template: 'template1',
 };
 
 /* ============================
-   COMPONENTE: UBICACIONES (igual que el original, con estilos claros)
+   COMPONENTE: UBICACIONES
    ============================ */
 const LocationForm = ({ locations, setFormData }) => {
-  // predicciones por input (index -> array de predicciones)
-  const [predictions, setPredictions] = useState({});
+  const [predictions, setPredictions] = useState({}); // { [index]: Prediction[] }
+  const timers = useRef({});                          // debounce por índice
+  const [mapPreview, setMapPreview] = useState({ open: false, src: '', link: '' });
+
+  const GMAPS_EMBED_KEY =
+    import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
+    import.meta.env.VITE_GOOGLE_PLACES_API_KEY ||
+    '';
+
+  // URL IFRAME (Maps Embed API)
+  const buildEmbedSrc = ({ lat, lng, placeId, address }) => {
+    const base = 'https://www.google.com/maps/embed/v1';
+    const key = `key=${encodeURIComponent(GMAPS_EMBED_KEY)}&language=es`;
+    if (placeId) return `${base}/place?${key}&q=place_id:${encodeURIComponent(placeId)}`;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return `${base}/view?${key}&center=${lat},${lng}&zoom=16&maptype=roadmap`;
+    }
+    return `${base}/search?${key}&q=${encodeURIComponent(address || '')}`;
+  };
+
+  // URL normal para abrir Google Maps
+  const buildMapsLink = ({ lat, lng, placeId, address }) => {
+    if (placeId) return `https://www.google.com/maps/place/?q=place_id:${encodeURIComponent(placeId)}`;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    }
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address || '')}`;
+  };
+
+  useEffect(() => {
+    return () => { Object.values(timers.current).forEach(clearTimeout); };
+  }, []);
 
   const handleLocationChange = (index, field, value) => {
     const updated = [...locations];
     updated[index] = { ...updated[index], [field]: value };
     setFormData(prev => ({ ...prev, locations: updated }));
 
-    // Cuando escribe dirección, disparamos autocomplete
     if (field === 'address') {
+      if (timers.current[index]) clearTimeout(timers.current[index]);
+
       if ((value || '').length > 2) {
-        fetchPredictions(value)
-          .then(results => setPredictions(prev => ({ ...prev, [index]: results })))
-          .catch(() => setPredictions(prev => ({ ...prev, [index]: [] })));
+        timers.current[index] = setTimeout(async () => {
+          try {
+            const res = await fetchPredictions(value);
+            setPredictions(prev => ({ ...prev, [index]: res || [] }));
+          } catch {
+            setPredictions(prev => ({ ...prev, [index]: [] }));
+          }
+        }, 300);
       } else {
         setPredictions(prev => ({ ...prev, [index]: [] }));
       }
     }
   };
 
-  const handleSelectPrediction = async (index, place) => {
-    const details = await fetchPlaceDetails(place.placeId);
+  const handleSelectPrediction = async (index, p) => {
+    const placeIdFromPrediction = p?.placeId || p?.place_id || p?.id;
+    if (!placeIdFromPrediction) return;
+
+    const details = await fetchPlaceDetails(placeIdFromPrediction);
     if (!details) return;
 
-    const comps = details.addressComponents || [];
-    const getComp = (type) =>
-      comps.find((c) => c.types?.includes(type))?.longText || '';
-
-    const newLocations = [...locations];
-    newLocations[index] = {
-      ...newLocations[index],
-      address: details.formattedAddress || '',
-      city: getComp('locality'),
-      state: getComp('administrative_area_level_1'),
-      country: getComp('country'),
-      lat: details.location?.latitude || null,
-      lng: details.location?.longitude || null,
+    const comps = details.addressComponents || details.address_components || [];
+    const getComp = (type) => {
+      const c = comps.find(comp => (comp.types || []).includes(type));
+      return c?.longText || c?.long_name || '';
     };
 
-    setFormData((prev) => ({ ...prev, locations: newLocations }));
-    setPredictions((prev) => ({ ...prev, [index]: [] })); // cerrar dropdown
+    const formatted = details.formattedAddress || details.formatted_address || '';
+
+    const geo = details.location || details.latLng || details.geometry?.location;
+    let lat = null, lng = null;
+    if (geo) {
+      const rawLat = typeof geo.lat === 'function' ? geo.lat() : (geo.latitude ?? geo.lat);
+      const rawLng = typeof geo.lng === 'function' ? geo.lng() : (geo.longitude ?? geo.lng);
+      lat = Number(rawLat);
+      lng = Number(rawLng);
+    }
+
+    const placeId = details.id || details.place_id || placeIdFromPrediction;
+
+    const next = [...locations];
+    next[index] = {
+      ...next[index],
+      address: formatted || next[index].address,
+      city: getComp('locality') || getComp('administrative_area_level_2'),
+      state: getComp('administrative_area_level_1'),
+      country: getComp('country'),
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
+      placeId: placeId || next[index].placeId,
+    };
+
+    setFormData(prev => ({ ...prev, locations: next }));
+    setPredictions(prev => ({ ...prev, [index]: [] }));
+
+    const src  = buildEmbedSrc({ lat, lng, placeId, address: formatted || next[index].address });
+    const link = buildMapsLink({ lat, lng, placeId, address: formatted || next[index].address });
+    setMapPreview({ open: true, src, link });
   };
 
   const addLocation = () => {
@@ -115,7 +176,7 @@ const LocationForm = ({ locations, setFormData }) => {
       ...prev,
       locations: [
         ...prev.locations,
-        { title: '', time: '', address: '', city: '', state: '', country: '', lat: null, lng: null },
+        { title: '', time: '', address: '', city: '', state: '', country: '', lat: null, lng: null, placeId: undefined },
       ],
     }));
   };
@@ -141,38 +202,31 @@ const LocationForm = ({ locations, setFormData }) => {
             type="text"
             value={loc.address}
             onChange={(e) => handleLocationChange(index, 'address', e.target.value)}
+            onDoubleClick={() => {
+              const src  = buildEmbedSrc({ lat: loc.lat, lng: loc.lng, placeId: loc.placeId, address: loc.address });
+              const link = buildMapsLink({ lat: loc.lat, lng: loc.lng, placeId: loc.placeId, address: loc.address });
+              if (link) setMapPreview({ open: true, src, link });
+            }}
             placeholder="Buscar lugar o dirección"
             className="w-full px-3 py-2 bg-white rounded-lg border border-slate-200 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-200 focus:border-violet-300"
           />
 
           {/* Dropdown de sugerencias */}
           {predictions[index]?.length > 0 && (
-            <ul className="absolute bg-white border border-slate-200 rounded-xl mt-1 w-full z-10 max-h-56 overflow-y-auto shadow-lg">
+            <ul className="absolute left-0 right-0 bg-white text-slate-900 border border-slate-200 rounded-xl mt-1 w-full z-20 max-h-56 overflow-y-auto shadow-lg">
               {predictions[index].map((p, i) => (
                 <li
-                  key={`${p.placeId}-${i}`}
-                  className="px-3 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-700"
+                  key={`${p.placeId || p.place_id || p.id}-${i}`}
+                  className="px-3 py-2 hover:bg-slate-50 cursor-pointer text-sm text-slate-900"
                   onClick={() => handleSelectPrediction(index, p)}
                 >
-                  {p.mainText} {p.secondaryText && <span className="opacity-70">– {p.secondaryText}</span>}
+                  {(p.mainText || p.structured_formatting?.main_text || p.description || '').toString()}{' '}
+                  {(p.secondaryText || p.structured_formatting?.secondary_text) && (
+                    <span className="opacity-70">– {(p.secondaryText || p.structured_formatting?.secondary_text)}</span>
+                  )}
                 </li>
               ))}
             </ul>
-          )}
-
-          {/* Mapa preview */}
-          {loc.lat && loc.lng && (
-            <div className="w-full h-48 rounded-xl overflow-hidden border border-slate-200">
-              <iframe
-                title={`map-${index}`}
-                width="100%"
-                height="100%"
-                style={{ border: 0 }}
-                loading="lazy"
-                allowFullScreen
-                src={`https://www.google.com/maps/embed/v1/view?key=${import.meta.env.VITE_GOOGLE_MAPS_API_KEY}&center=${loc.lat},${loc.lng}&zoom=15`}
-              />
-            </div>
           )}
         </div>
       ))}
@@ -184,12 +238,45 @@ const LocationForm = ({ locations, setFormData }) => {
       >
         Añadir otra ubicación
       </Button>
+
+      {/* Popup con mapa (iframe) */}
+      <Dialog open={mapPreview.open} onOpenChange={(o) => setMapPreview((p) => ({ ...p, open: o }))}>
+        <DialogContent className="sm:max-w-[900px]" aria-describedby="map-desc">
+          <DialogHeader>
+            <DialogTitle>Ubicación en el mapa</DialogTitle>
+            <DialogDescription id="map-desc">
+              Vista previa del mapa con la ubicación seleccionada.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="w-full aspect-video rounded-lg overflow-hidden border">
+            <iframe
+              title="map-preview"
+              width="100%"
+              height="100%"
+              style={{ border: 0 }}
+              loading="lazy"
+              allowFullScreen
+              src={mapPreview.src}
+            />
+          </div>
+          <DialogFooter>
+            <a
+              href={mapPreview.link}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm underline text-slate-700"
+            >
+              Abrir en Google Maps
+            </a>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 /* ============================
-   WIZARD PRINCIPAL (manteniendo pasos, campos y guardado)
+   WIZARD PRINCIPAL
    ============================ */
 const InvitationWizard = () => {
   const navigate = useNavigate();
@@ -218,6 +305,7 @@ const InvitationWizard = () => {
           country: loc.country || '',
           lat: loc.lat ?? null,
           lng: loc.lng ?? null,
+          placeId: loc.placeId,
         }));
       }
       return parsedData;
@@ -263,7 +351,6 @@ const InvitationWizard = () => {
     Math.random().toString(36).slice(2, 10).toUpperCase()
   );
 
-  // 💡 Normaliza "hosts" para aceptar string o array (evita error split is not a function)
   const normalizeHosts = (val) => {
     if (Array.isArray(val)) return val.map((h) => String(h).trim()).filter(Boolean);
     return String(val || '').split(/\s*(?:&|y)\s*/i).map((h) => h.trim()).filter(Boolean);
@@ -281,7 +368,6 @@ const InvitationWizard = () => {
     setIsSubmitting(true);
 
     try {
-      // Generar/usar id antes de subir imagen para carpeta correcta
       const eventId = isUpdate ? editingEventId : shortEventId();
 
       let cover_image_url = imagePreview && imagePreview.startsWith('https://') ? imagePreview : null;
@@ -359,7 +445,6 @@ const InvitationWizard = () => {
     params.set('step', newStep);
     navigate(`?${params.toString()}`, { replace: true });
   };
-  const nextStep = () => updateStep(Math.min(step + 1, wizardSteps.length));
   const prevStep = () => updateStep(Math.max(step - 1, 1));
 
   const handleInputChange = (e) =>
@@ -382,13 +467,11 @@ const InvitationWizard = () => {
     }
   };
 
-  // En edición: guardar y volver
   const handleSaveAndExit = async () => {
     const id = await saveEvent(true);
-    if (id) navigate(-1);
+    if (id) navigate(`/host/${id}`);
   };
 
-  // En creación, se mantiene el flujo original
   const finishWizard = async () => {
     if (editingEventId) {
       const id = await saveEvent(true);
@@ -396,8 +479,8 @@ const InvitationWizard = () => {
     } else {
       const id = await saveEvent(false);
       if (id) {
-        toast({ title: '¡Vista previa lista!', description: 'Revisa tu invitación.' });
-        navigate('/preview');
+        toast({ title: '¡Evento listo!', description: 'Te llevamos al panel del evento.' });
+        navigate(`/host/${id}`);
       }
     }
   };
@@ -414,7 +497,7 @@ const InvitationWizard = () => {
                 whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setFormData((p) => ({ ...p, eventType: type.key }));
-                  nextStep();
+                  updateStep(2);
                 }}
                 className={`rounded-2xl p-6 border-2 text-center cursor-pointer transition ${
                   formData.eventType === type.key ? 'border-violet-500 bg-violet-50' : 'border-slate-200 bg-white hover:bg-slate-50'
@@ -553,7 +636,7 @@ const InvitationWizard = () => {
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900">{editingEventId ? 'Editar Invitación' : 'Crea tu Invitación'}</h1>
           <Button
-            onClick={() => navigate(editingEventId ? `/host/${editingEventId}` : '/')}
+            onClick={() => navigate(editingEventId ? `/host/${editingEventId}` : '/profile')}
             variant="ghost"
             size="icon"
             className="text-slate-700 hover:bg-slate-100"
@@ -623,7 +706,7 @@ const InvitationWizard = () => {
               className="bg-emerald-600 hover:bg-emerald-700 text-white"
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Guardando...' : 'Finalizar y Ver Previa'}
+              {isSubmitting ? 'Guardando...' : 'Finalizar y ver evento'}
             </Button>
           )}
         </div>
