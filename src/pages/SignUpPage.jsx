@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, Link } from 'react-router-dom';
-import { UserPlus, Mail, Lock, User as UserIcon } from 'lucide-react';
+import { UserPlus, Mail, Lock, User as UserIcon, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 
@@ -34,7 +34,21 @@ const SignUpPage = () => {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md"
       >
-        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
+        {/* card */}
+        <div className="relative bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
+          {/* Back button (top-left of card) */}
+          <div className="absolute top-4 left-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.history.back()}
+              className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-slate-100/70 focus-visible:ring-2 focus-visible:ring-purple-300"
+              aria-label="Volver"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+          </div>
+
           <div className="text-center">
             <h1 className="text-2xl font-semibold text-slate-900">Crea una cuenta nueva</h1>
             <p className="mt-2 text-sm text-slate-600">

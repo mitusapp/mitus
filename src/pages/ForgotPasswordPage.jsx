@@ -34,7 +34,21 @@ const ForgotPasswordPage = () => {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md"
       >
-        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
+        {/* Card */}
+        <div className="relative bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
+          {/* Botón Back (arriba a la izquierda, vuelve a la página anterior) */}
+          <div className="absolute top-4 left-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.history.back()}
+              className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-slate-100/70 focus-visible:ring-2 focus-visible:ring-purple-300"
+              aria-label="Volver"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+          </div>
+
           <div className="text-center">
             <h1 className="text-2xl font-semibold text-slate-900">Recuperar contraseña</h1>
             <p className="mt-2 text-sm text-slate-600">

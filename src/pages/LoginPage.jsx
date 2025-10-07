@@ -2,81 +2,135 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
-import { LogIn, Mail, Lock } from 'lucide-react';
+import { LogIn, Mail, Lock, ArrowLeft } from 'lucide-react';
 import { SiApple } from 'react-icons/si';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 
+// ✅ Flag para ocultar/mostrar Apple por entorno
+const ENABLE_APPLE = import.meta.env.VITE_AUTH_APPLE_ENABLED === 'true';
+
+// Icono de Google (SVG inline para no depender de libs externas)
 const GoogleIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 533.5 544.3" aria-hidden="true">
-    <path fill="#4285F4" d="M533.5 278.4c0-18.4-1.6-36.1-4.7-53.2H272.1v100.9h146.9c-6.4 34.5-26 63.7-55.4 83.2v68h89.6c52.4-48.3 80.3-119.6 80.3-198.9z"/>
-    <path fill="#34A853" d="M272.1 544.3c73.7 0 135.6-24.4 180.8-66.1l-89.6-68c-24.9 16.7-56.8 26.6-91.1 26.6-70 0-129.3-47.3-150.6-110.9H30.3v69.6c45 88.9 136.9 148.8 241.8 148.8z"/>
-    <path fill="#FBBC05" d="M121.5 325.9c-10.2-30.5-10.2-63.4 0-94l.1-69.5H30.3c-40.8 81.4-40.8 176.2 0 257.6l91.1-69.6z"/>
-    <path fill="#EA4335" d="M272.1 106.4c39.9-.6 78.1 14 107.4 41.4l80.3-80.3C412.9 25.2 348.8-.1 272.1 0 167.2 0 75.3 59.9 30.3 148.8l91.1 69.6C142.7 154.8 202.1 107.5 272.1 106.4z"/>
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+    <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303C33.596 32.657 29.334 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.156 7.957 3.043l5.657-5.657C34.675 6.053 29.64 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.651-.389-3.917z"/>
+    <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.382 16.107 18.82 12 24 12c3.059 0 5.842 1.156 7.957 3.043l5.657-5.657C34.675 6.053 29.64 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
+    <path fill="#4CAF50" d="M24 44c5.258 0 10.055-2.015 13.659-5.303l-6.305-5.332C29.306 34.438 26.809 35.5 24 35.5c-5.303 0-9.799-3.587-11.387-8.429l-6.57 5.06C8.327 39.62 15.547 44 24 44z"/>
+    <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303c-1.009 2.873-3.144 5.223-5.644 6.362l6.305 5.332C39.635 36.6 44 30.969 44 24c0-1.341-.138-2.651-.389-3.917z"/>
   </svg>
 );
 
 const LoginPage = () => {
   const { signIn, signInWithProvider } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleOAuthSignIn = async (provider) => {
+    try {
+      setError('');
+      setLoading(true);
+      await signInWithProvider(provider); // Redirige; onAuthStateChange decide el destino
+    } catch (e) {
+      setError(e?.message || 'No se pudo iniciar sesión.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    await signIn(email, password);
-    setLoading(false);
+    try {
+      setError('');
+      setLoading(true);
+      const { error } = await signIn(email, password);
+      if (error) throw error;
+      // Navegación la maneja el contexto (postLoginRedirect o /profile)
+    } catch (e) {
+      setError(e?.message || 'Credenciales inválidas');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleOAuthSignIn = async (provider) => {
-    setLoading(true);
-    await signInWithProvider(provider);
-    setLoading(false);
-  };
+  // clases de input para asegurar texto oscuro sin tocar otros elementos
+  const inputClasses =
+    "w-full h-11 pl-10 pr-3 rounded-xl border border-slate-300 " +
+    "bg-white text-slate-900 placeholder-slate-400 caret-purple-600 " +
+    "focus:outline-none focus:ring-2 focus:ring-purple-200 focus:border-purple-400";
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-white px-4">
       <motion.div
-        initial={{ opacity: 0, y: 16 }}
+        className="w-full max-w-md"
+        initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="w-full max-w-md"
       >
-        <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-8">
-          <div className="text-center">
-            <h1 className="text-2xl font-semibold text-slate-900">Inicia sesión en tu cuenta</h1>
-            <p className="mt-2 text-sm text-slate-600">
-              o{' '}
-              <Link to="/signup" className="font-medium text-purple-600 hover:text-purple-700">
-                crea una cuenta nueva
-              </Link>
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mt-6">
+        <div className="relative bg-white/90 border border-slate-200 rounded-2xl shadow-sm p-8">
+          <div className="absolute top-4 left-4">
             <Button
-              type="button"
-              variant="outline"
-              className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
-              onClick={() => handleOAuthSignIn('google')}
-              disabled={loading}
+              variant="ghost"
+              size="icon"
+              onClick={() => window.location.assign('/')}
+              className="p-2 rounded-full text-slate-500 hover:text-purple-600 hover:bg-slate-100/70 focus-visible:ring-2 focus-visible:ring-purple-300"
+              aria-label="Volver al inicio"
             >
-              <GoogleIcon />
-              <span className="ml-2">Google</span>
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
-              onClick={() => handleOAuthSignIn('apple')}
-              disabled={loading}
-            >
-              <SiApple className="w-5 h-5" aria-hidden="true" />
-              <span className="ml-2">Apple</span>
+              <ArrowLeft className="w-5 h-5" />
             </Button>
           </div>
+
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-bold text-slate-900">Iniciar sesión</h1>
+            <p className="text-slate-500 text-sm">Accede a tu panel para gestionar tus eventos</p>
+          </div>
+
+          {error && (
+            <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+              {error}
+            </div>
+          )}
+
+          {ENABLE_APPLE ? (
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
+                onClick={() => handleOAuthSignIn('google')}
+                disabled={loading}
+              >
+                <GoogleIcon />
+                <span className="ml-2">Google</span>
+              </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 border-slate-300 text-slate-700 hover:bg-slate-50"
+                onClick={() => handleOAuthSignIn('apple')}
+                disabled={loading}
+              >
+                <SiApple className="w-5 h-5" aria-hidden="true" />
+                <span className="ml-2">Apple</span>
+              </Button>
+            </div>
+          ) : (
+            <div className="flex justify-center mb-6">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 border-slate-300 text-slate-100 hover:bg-slate-50"
+                onClick={() => handleOAuthSignIn('google')}
+                disabled={loading}
+              >
+                <GoogleIcon />
+                <span className="ml-2">Google</span>
+              </Button>
+            </div>
+          )}
 
           <div className="relative my-6">
             <div className="absolute inset-0 flex items-center">
@@ -88,41 +142,48 @@ const LoginPage = () => {
           </div>
 
           <form className="space-y-5" onSubmit={handleLogin}>
-            <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="email">
+                Correo electrónico
+              </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
-                  id="email-address"
-                  name="email"
+                  id="email"
                   type="email"
-                  autoComplete="email"
                   required
-                  className="appearance-none rounded-xl w-full pl-10 pr-3 py-3 bg-white border border-slate-300 placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
-                  placeholder="Correo electrónico"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                  className="appearance-none rounded-xl w-full pl-10 pr-3 py-3 bg-white border border-slate-300 placeholder-slate-400 text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-600 focus:border-transparent"
-                  placeholder="Contraseña"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClasses}
+                  placeholder="tucorreo@ejemplo.com"
                 />
               </div>
             </div>
 
-            <div className="flex items-center justify-end">
-              <Link to="/forgot-password" className="text-sm font-medium text-purple-600 hover:text-purple-700">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="password">
+                Contraseña
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className={inputClasses}
+                  placeholder="Tu contraseña"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <Link to="/forgot-password" className="text-sm text-purple-600 hover:text-purple-700">
                 ¿Olvidaste tu contraseña?
+              </Link>
+              <Link to="/signup" className="text-sm text-slate-600 hover:text-slate-800">
+                Crear cuenta con correo
               </Link>
             </div>
 

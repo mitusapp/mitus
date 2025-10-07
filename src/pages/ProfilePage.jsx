@@ -1,8 +1,7 @@
-
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Percent, Trash2, Sparkles, Search, Settings, LogOut } from 'lucide-react';
+import { Calendar, Percent, Trash2, Sparkles, Search, Settings, LogOut, Heart, MessageCircle, User as UserIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -169,6 +168,11 @@ const ProfilePage = () => {
     return name[0].toUpperCase();
   };
 
+  const firstName = useMemo(() => {
+    const full = profile?.full_name?.trim();
+    return full ? full.split(/\s+/)[0] : '';
+  }, [profile?.full_name]);
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -177,6 +181,44 @@ const ProfilePage = () => {
     <div className="min-h-screen bg-[#FBF8F7] py-8 px-4">
       <div className="max-w-7xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+          
+          {/* === Topbar === */}
+          <div className="px-4 py-3 mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/90 rounded-full p-2 border border-[#E6E3E0]">
+                <Heart className="w-5 h-5 text-[#E8A4B8]" />
+              </div>
+              <span className="text-[#1E1E1E] font-semibold">Mitus app</span>
+            </div>
+            <Button variant="ghost" size="icon" className="text-[#1E1E1E] hover:text-[#B9A7F9] hover:bg-[#F8F3F2]">
+              <MessageCircle className="w-5 h-5" />
+            </Button>
+          </div>
+
+          {/* === Tarjeta saludo/usuario === */}
+          <div className="bg-white rounded-2xl border border-[#F8F3F2] px-5 py-4 mb-8 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {profile?.avatar_url ? (
+                <img
+                  src={profile.avatar_url}
+                  alt={profile?.full_name || 'Usuario'}
+                  className="w-12 h-12 rounded-full object-cover border border-[#E6E3E0]"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-full bg-[#F8F3F2] border border-[#E6E3E0] flex items-center justify-center">
+                  <UserIcon className="w-6 h-6 text-[#B9A7F9]" />
+                </div>
+              )}
+              <p className="text-lg font-semibold text-[#1E1E1E]">
+                Hola{firstName ? `, ${firstName}` : ''}, mira tus próximos eventos.
+              </p>
+            </div>
+            <Button variant="outline" className="border-[#DCD9D6] text-[#DCD9D6] hover:bg-[#F8F3F2]">
+              Editar perfil
+            </Button>
+          </div>
+
+          {/* === Cabecera existente === */}
           <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
             <h1 className="text-4xl md:text-5xl font-bold text-[#1E1E1E]">Mis Eventos</h1>
             <div className="flex items-center gap-4">

@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Camera, QrCode, Download, Rss, Sparkles, Heart, User } from 'lucide-react';
+import {
+  Calendar, Users, CheckCircle, Table, QrCode, Home, Image, MapPin,
+  Sparkles, User, Heart
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -10,26 +13,62 @@ const HomePage = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
 
+  // ✅ Si ya hay sesión, enviamos directo al dashboard
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/profile', { replace: true });
+    }
+  }, [loading, user, navigate]);
+
+  // Pequeño fallback visual mientras redirige
+  if (!loading && user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#FBF8F7]">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
   const features = [
     {
-      icon: <Rss className="w-8 h-8" />,
-      title: "Invitaciones Digitales",
-      description: "Comparte invitaciones únicas con confirmación de asistencia personalizada."
+      icon: <Calendar className="w-8 h-8" />,
+      title: "Crea tu evento",
+      description: "Define fecha, lugar, portada y detalles en minutos."
+    },
+    {
+      icon: <Users className="w-8 h-8" />,
+      title: "Invitados organizados",
+      description: "Administra lista, segmentos y notas en un solo lugar."
+    },
+    {
+      icon: <CheckCircle className="w-8 h-8" />,
+      title: "RSVP en tiempo real",
+      description: "Recibe confirmaciones y seguimiento instantáneo."
+    },
+    {
+      icon: <Table className="w-8 h-8" />,
+      title: "Mesas y asientos",
+      description: "Asigna lugares y visualiza el plano fácilmente."
     },
     {
       icon: <QrCode className="w-8 h-8" />,
-      title: "Álbum con QR",
-      description: "Tus invitados comparten recuerdos al instante con solo escanear un código."
+      title: "QR del evento",
+      description: "Genera y descarga códigos para acceso, galería y acciones clave."
     },
     {
-      icon: <Camera className="w-8 h-8" />,
-      title: "Galería en Vivo",
-      description: "Revive los momentos en tiempo real, sin perder detalle alguno."
+      icon: <Home className="w-8 h-8" />,
+      title: "Landing del evento",
+      description: "Información central en un enlace listo para compartir."
     },
     {
-      icon: <Download className="w-8 h-8" />,
-      title: "Recuerdos para Siempre",
-      description: "Conserva todas tus memorias en alta calidad, listas para revivir."
+      icon: <Image className="w-8 h-8" />,
+      title: "Álbum digital con QR",
+      description: "Tus invitados suben fotos y videos escaneando un código."
+    },
+    {
+      icon: <MapPin className="w-8 h-8" />,
+      title: "Encuentra tu mesa",
+      description: "Escanea el QR y ubica tu asiento al instante."
     }
   ];
 
@@ -64,11 +103,11 @@ const HomePage = () => {
         <div className="absolute inset-0 z-0">
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/30 to-white/20"></div>
           <img
-            className="w-full h-full object-cover" 
-            alt="Decoración elegante de un evento con flores y luces" 
-           src="https://images.unsplash.com/photo-1586245021641-a6ef44a4a1ff?q=80&w=2070" />
+            className="w-full h-full object-cover"
+            alt="Decoración elegante de un evento con flores y luces"
+            src="https://images.unsplash.com/photo-1586245021641-a6ef44a4a1ff?q=80&w=2070" />
         </div>
-        
+
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16 z-10">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -77,7 +116,7 @@ const HomePage = () => {
             className="text-center"
           >
             <div className="flex justify-center mb-8">
-              <motion.div 
+              <motion.div
                 animate={{ scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] }}
                 transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
                 className="relative bg-white/90 backdrop-blur-sm rounded-full p-6 border border-[#E6E3E0]"
@@ -85,16 +124,16 @@ const HomePage = () => {
                 <Heart className="w-16 h-16 text-[#E8A4B8]" />
               </motion.div>
             </div>
-            
+
             <h1 className="text-5xl md:text-7xl font-bold text-white mb-6 drop-shadow-lg">
               Mitus
             </h1>
-            
+
             <p className="text-xl md:text-2xl text-white mb-8 max-w-3xl mx-auto leading-relaxed drop-shadow">
-              Una plataforma exclusiva para planificar tus eventos y crear experiencias memorables. 
+              Una plataforma exclusiva para planificar tus eventos y crear experiencias memorables.
               <span className="text-[#B9A7F9] font-semibold"> Gestión de invitados, invitaciones digitales, álbumes de fotos y mucho más</span> en un solo lugar.
             </p>
-            
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <Button
                 onClick={() => navigate('/wizard')}
@@ -103,7 +142,7 @@ const HomePage = () => {
                 <Sparkles className="w-5 h-5 mr-2" />
                 Crear Evento
               </Button>
-              
+
               <Button
                 variant="outline"
                 className="border-white/70 text-white hover:bg-white/20 px-8 py-4 text-lg rounded-xl backdrop-blur-sm"

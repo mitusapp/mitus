@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { Lock, Key } from 'lucide-react';
+import { Lock, Key, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -38,44 +37,60 @@ const UpdatePasswordPage = () => {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="max-w-md w-full space-y-8 bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 shadow-2xl"
+        className="max-w-md w-full space-y-8"
       >
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
-            Crea una nueva contraseña
-          </h2>
-          <p className="mt-2 text-center text-sm text-gray-300">
-            Ingresa tu nueva contraseña. Debe tener al menos 6 caracteres.
-          </p>
-        </div>
-
-        <form className="space-y-6" onSubmit={handleUpdatePassword}>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              id="new-password"
-              name="password"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength="6"
-              className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 placeholder-gray-400 text-white focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm"
-              placeholder="Nueva contraseña"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+        {/* Card */}
+        <div className="relative bg-white/10 backdrop-blur-lg border border-white/20 rounded-2xl p-8 shadow-2xl">
+          {/* Botón Back (arriba a la izquierda, vuelve a la página anterior) */}
+          <div className="absolute top-4 left-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => window.history.back()}
+              className="p-2 rounded-full text-white/80 hover:text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-purple-300"
+              aria-label="Volver"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
           </div>
 
           <div>
-            <Button
-              type="submit"
-              disabled={loading}
-              className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
-            >
-              {loading ? 'Actualizando...' : <><Key className="w-5 h-5 mr-2" /> Actualizar Contraseña</>}
-            </Button>
+            <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
+              Crea una nueva contraseña
+            </h2>
+            <p className="mt-2 text-center text-sm text-gray-300">
+              Ingresa tu nueva contraseña. Debe tener al menos 6 caracteres.
+            </p>
           </div>
-        </form>
+
+          <form className="space-y-6" onSubmit={handleUpdatePassword}>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                id="new-password"
+                name="password"
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength="6"
+                className="appearance-none rounded-xl relative block w-full pl-10 pr-3 py-3 bg-white/10 border border-white/20 placeholder-gray-400 text-white focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm"
+                placeholder="Nueva contraseña"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <Button
+                type="submit"
+                disabled={loading}
+                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-xl text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+              >
+                {loading ? 'Actualizando...' : <><Key className="w-5 h-5 mr-2" /> Actualizar Contraseña</>}
+              </Button>
+            </div>
+          </form>
+        </div>
       </motion.div>
     </div>
   );

@@ -15,34 +15,46 @@ export const AuthProvider = ({ children }) => {
   // Arranca en true para no “parpadear” sin sesión restaurada
   const [loading, setLoading] = useState(true);
 
-  // Restaurar sesión al cargar + escuchar cambios (SIGNED_IN, SIGNED_OUT, TOKEN_REFRESHED, etc.)
+  const handleSessionChange = useCallback((currentSession) => {
+    setSession(currentSession);
+    setUser(currentSession?.user ?? null);
+    setLoading(false);
+  }, []);
+
+  // Restaurar sesión y escuchar cambios
   useEffect(() => {
-    let active = true;
+    let mounted = true;
 
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!active) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      if (!mounted) return;
+      handleSessionChange(session);
     })();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      handleSessionChange(session);
 
-      // Si falla la renovación silenciosa del token, fuerza sign-out limpio
-      if (event === 'TOKEN_REFRESH_FAILED') {
-        supabase.auth.signOut();
+      // ✅ Al iniciar sesión (email/pass u OAuth), redirige al destino original o /profile
+      if (event === 'SIGNED_IN') {
+        try {
+          const target = sessionStorage.getItem('postLoginRedirect');
+          if (target) {
+            sessionStorage.removeItem('postLoginRedirect');
+            navigate(target, { replace: true });
+          } else {
+            navigate('/profile', { replace: true });
+          }
+        } catch {
+          navigate('/profile', { replace: true });
+        }
       }
     });
 
     return () => {
-      active = false;
+      mounted = false;
       subscription?.unsubscribe();
     };
-  }, []);
+  }, [handleSessionChange, navigate]);
 
   const signUp = useCallback(async (email, password, options) => {
     setLoading(true);
@@ -51,7 +63,7 @@ export const AuthProvider = ({ children }) => {
       password,
       options: {
         ...options,
-        // Tras registrarse, llegará un correo y volverá a la app según este redirect
+        // Tras registrarse, el usuario confirma y vuelve a /login
         emailRedirectTo: `${window.location.origin}/login`,
       },
     });
@@ -60,10 +72,13 @@ export const AuthProvider = ({ children }) => {
       toast({
         variant: 'destructive',
         title: 'Error al crear la cuenta',
-        description: error.message || 'Algo salió mal.',
+        description: error.message || 'Intenta de nuevo.',
       });
     } else {
-      // Mantiene tu flujo actual: pantalla informativa
+      toast({
+        title: 'Confirma tu correo',
+        description: 'Te enviamos un enlace para activar tu cuenta.',
+      });
       navigate('/signup-confirm', { replace: true });
     }
     setLoading(false);
@@ -80,45 +95,56 @@ export const AuthProvider = ({ children }) => {
         title: 'Error al iniciar sesión',
         description: error.message || 'Credenciales incorrectas.',
       });
-    } else if (data.session) {
-      // Estos set ayudan a actualizar UI de inmediato (el listener también lo hará)
-      setSession(data.session);
-      setUser(data.user);
-      let redirectTo = '/profile';
+      setLoading(false);
+      return { data, error };
+    }
+
+    if (data?.session) {
+      handleSessionChange(data.session);
+      let next = '/profile';
       try {
-        redirectTo = sessionStorage.getItem('postLoginRedirect') || '/profile';
-        sessionStorage.removeItem('postLoginRedirect');
+        const stored = sessionStorage.getItem('postLoginRedirect');
+        if (stored) {
+          sessionStorage.removeItem('postLoginRedirect');
+          next = stored;
+        }
       } catch {}
-      navigate(redirectTo, { replace: true });
+      navigate(next, { replace: true });
     }
     setLoading(false);
-    return { error };
-  }, [toast, navigate]);
+    return { data, error };
+  }, [navigate, toast, handleSessionChange]);
 
   const signInWithProvider = useCallback(async (provider) => {
     setLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        // Tras OAuth el navegador regresará aquí; el listener restaurará la sesión
-        redirectTo: `${window.location.origin}/profile`,
+        // ✅ Vuelve a una ruta pública; el listener decidirá el destino final
+        redirectTo: `${window.location.origin}/login`,
+        // En Google, forzar selector de cuenta ayuda a evitar sesiones pegadas
+        queryParams: provider === 'google' ? { prompt: 'select_account' } : undefined,
       },
     });
+
     if (error) {
       toast({
         variant: 'destructive',
         title: 'Error de autenticación',
         description: error.message || 'No se pudo iniciar sesión con el proveedor.',
       });
+      setLoading(false);
+      return { data, error };
     }
-    setLoading(false);
+
+    // Supabase redirige; al volver, onAuthStateChange hará la navegación.
+    return { data, error: null };
   }, [toast]);
 
   const signOut = useCallback(async () => {
     setLoading(true);
     const { error } = await supabase.auth.signOut();
-    setSession(null);
-    setUser(null);
+    handleSessionChange(null);
     if (error && error.code !== 'session_not_found') {
       toast({
         variant: 'destructive',
@@ -128,7 +154,7 @@ export const AuthProvider = ({ children }) => {
     }
     navigate('/', { replace: true });
     setLoading(false);
-  }, [toast, navigate]);
+  }, [toast, navigate, handleSessionChange]);
 
   const value = useMemo(() => ({
     user,
