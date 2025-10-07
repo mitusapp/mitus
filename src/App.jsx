@@ -43,6 +43,11 @@ const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
 const UpdatePasswordPage = lazy(() => import('@/pages/UpdatePasswordPage'));
 const GlobalSettingsPage = lazy(() => import('@/pages/GlobalSettingsPage'));
 
+// 🔗 Nuevas páginas del perfil
+const ProfileTasksPage = lazy(() => import('@/pages/ProfileTasksPage'));
+const ProfileContactsPage = lazy(() => import('@/pages/ProfileContactsPage'));
+const ProfileEditPage = lazy(() => import('@/pages/ProfileEditPage'));
+
 function App() {
   return (
     <>
@@ -68,7 +73,12 @@ function App() {
 
             <Route path="/create-event" element={<Navigate to="/wizard" replace />} />
 
+            {/* Perfil y nuevas subsecciones */}
             <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
+            <Route path="/profile/tasks" element={<PrivateRoute><ProfileTasksPage /></PrivateRoute>} />
+            <Route path="/profile/contacts" element={<PrivateRoute><ProfileContactsPage /></PrivateRoute>} />
+            <Route path="/profile/edit" element={<PrivateRoute><ProfileEditPage /></PrivateRoute>} />
+
             <Route path="/settings" element={<PrivateRoute><GlobalSettingsPage /></PrivateRoute>} />
 
             <Route path="/host/:eventId" element={<PrivateRoute><HostDashboard /></PrivateRoute>} />
