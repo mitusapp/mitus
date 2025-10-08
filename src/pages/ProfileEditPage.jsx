@@ -58,6 +58,7 @@ const ProfileEditPage = () => {
 
           {/* === Barra de navegación sticky === */}
           <ProfileTabsNav />
+          <div className="mt-6" />   {/* 24px aprox */}
 
           {/* === Contenido: Editar Perfil (placeholder, sin lógica de guardado) === */}
           <div className="bg-white rounded-2xl border border-[#F8F3F2] p-6">

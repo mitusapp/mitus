@@ -61,6 +61,7 @@ const ProfileContactsPage = () => {
 
           {/* === Barra de navegación sticky === */}
           <ProfileTabsNav />
+          <div className="mt-6" />   {/* 24px aprox */}
 
           {/* === Contenido: Proveedores y contactos === */}
           <div className="flex justify-between items-center mb-6 flex-wrap gap-4">

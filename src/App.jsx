@@ -6,6 +6,10 @@ import { Toaster } from '@/components/ui/toaster';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import PrivateRoute from '@/components/PrivateRoute';
 
+// 🔻 React Query
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+const queryClient = new QueryClient();
+
 const HomePage = lazy(() => import('@/pages/HomePage'));
 const HostDashboard = lazy(() => import('@/pages/HostDashboard'));
 const EventLanding = lazy(() => import('@/pages/EventLanding'));
@@ -39,14 +43,12 @@ const PlannerTeam = lazy(() => import('@/pages/planner/PlannerTeam'));
 const PlannerInspiration = lazy(() => import('@/pages/planner/PlannerInspiration'));
 const DevHelper = lazy(() => import('@/components/DevHelper'));
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'));
-const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
-const UpdatePasswordPage = lazy(() => import('@/pages/UpdatePasswordPage'));
-const GlobalSettingsPage = lazy(() => import('@/pages/GlobalSettingsPage'));
-
-// 🔗 Nuevas páginas del perfil
 const ProfileTasksPage = lazy(() => import('@/pages/ProfileTasksPage'));
 const ProfileContactsPage = lazy(() => import('@/pages/ProfileContactsPage'));
 const ProfileEditPage = lazy(() => import('@/pages/ProfileEditPage'));
+const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
+const UpdatePasswordPage = lazy(() => import('@/pages/UpdatePasswordPage'));
+const GlobalSettingsPage = lazy(() => import('@/pages/GlobalSettingsPage'));
 
 function App() {
   return (
@@ -58,61 +60,65 @@ function App() {
           content="Crea invitaciones y álbumes digitales para bodas, quinceaños y eventos. Los invitados confirman asistencia y suben fotos al instante."
         />
       </Helmet>
-      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
-        <Suspense fallback={<LoadingSpinner />}>
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignUpPage />} />
-            <Route path="/signup-confirm" element={<SignUpConfirmPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="/update-password" element={<UpdatePasswordPage />} />
 
-            <Route path="/wizard" element={<PrivateRoute><InvitationWizard /></PrivateRoute>} />
-            <Route path="/preview" element={<PrivateRoute><InvitationPreview /></PrivateRoute>} />
+      {/* ✅ Proveedor de React Query */}
+      <QueryClientProvider client={queryClient}>
+        <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900">
+          <Suspense fallback={<LoadingSpinner />}>
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignUpPage />} />
+              <Route path="/signup-confirm" element={<SignUpConfirmPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/update-password" element={<UpdatePasswordPage />} />
 
-            <Route path="/create-event" element={<Navigate to="/wizard" replace />} />
+              <Route path="/wizard" element={<PrivateRoute><InvitationWizard /></PrivateRoute>} />
+              <Route path="/preview" element={<PrivateRoute><InvitationPreview /></PrivateRoute>} />
 
-            {/* Perfil y nuevas subsecciones */}
-            <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
-            <Route path="/profile/tasks" element={<PrivateRoute><ProfileTasksPage /></PrivateRoute>} />
-            <Route path="/profile/contacts" element={<PrivateRoute><ProfileContactsPage /></PrivateRoute>} />
-            <Route path="/profile/edit" element={<PrivateRoute><ProfileEditPage /></PrivateRoute>} />
+              <Route path="/create-event" element={<Navigate to="/wizard" replace />} />
 
-            <Route path="/settings" element={<PrivateRoute><GlobalSettingsPage /></PrivateRoute>} />
+              {/* Perfil y subsecciones */}
+              <Route path="/profile" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
+              <Route path="/profile/tasks" element={<PrivateRoute><ProfileTasksPage /></PrivateRoute>} />
+              <Route path="/profile/contacts" element={<PrivateRoute><ProfileContactsPage /></PrivateRoute>} />
+              <Route path="/profile/edit" element={<PrivateRoute><ProfileEditPage /></PrivateRoute>} />
 
-            <Route path="/host/:eventId" element={<PrivateRoute><HostDashboard /></PrivateRoute>} />
-            <Route path="/host/:eventId/moderation" element={<PrivateRoute><Moderation /></PrivateRoute>} />
-            <Route path="/host/:eventId/settings" element={<PrivateRoute><EventSettings /></PrivateRoute>} />
-            <Route path="/host/:eventId/analytics" element={<PrivateRoute><AnalyticsPage /></PrivateRoute>} />
-            <Route path="/host/:eventId/rsvps" element={<PrivateRoute><RsvpPage /></PrivateRoute>} />
-            <Route path="/host/:eventId/guests" element={<PrivateRoute><GuestsPage /></PrivateRoute>} />
-            <Route path="/host/:eventId/tables" element={<PrivateRoute><TablesPage /></PrivateRoute>} />
+              <Route path="/settings" element={<PrivateRoute><GlobalSettingsPage /></PrivateRoute>} />
 
-            <Route path="/host/:eventId/planner" element={<PrivateRoute><PlannerDashboard /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/tasks" element={<PrivateRoute><PlannerTasks /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/timeline" element={<PrivateRoute><PlannerTimeline /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/providers" element={<PrivateRoute><PlannerProviders /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/budget" element={<PrivateRoute><PlannerBudget /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/documents" element={<PrivateRoute><PlannerDocuments /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/venues" element={<PrivateRoute><PlannerVenues /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/catering" element={<PrivateRoute><PlannerCatering /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/gifts" element={<PrivateRoute><PlannerGifts /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/team" element={<PrivateRoute><PlannerTeam /></PrivateRoute>} />
-            <Route path="/host/:eventId/planner/inspiration" element={<PrivateRoute><PlannerInspiration /></PrivateRoute>} />
+              <Route path="/host/:eventId" element={<PrivateRoute><HostDashboard /></PrivateRoute>} />
+              <Route path="/host/:eventId/moderation" element={<PrivateRoute><Moderation /></PrivateRoute>} />
+              <Route path="/host/:eventId/settings" element={<PrivateRoute><EventSettings /></PrivateRoute>} />
+              <Route path="/host/:eventId/analytics" element={<PrivateRoute><AnalyticsPage /></PrivateRoute>} />
+              <Route path="/host/:eventId/rsvps" element={<PrivateRoute><RsvpPage /></PrivateRoute>} />
+              <Route path="/host/:eventId/guests" element={<PrivateRoute><GuestsPage /></PrivateRoute>} />
+              <Route path="/host/:eventId/tables" element={<PrivateRoute><TablesPage /></PrivateRoute>} />
 
-            <Route path="/event/:eventId" element={<EventLanding />} />
-            <Route path="/invitation/:eventId" element={<InvitationPage />} />
-            <Route path="/event/:eventId/upload" element={<GuestUpload />} />
-            <Route path="/event/:eventId/gallery" element={<EventGallery />} />
-            <Route path="/event/:eventId/guestbook" element={<GuestBook />} />
-            <Route path="/event/:eventId/slideshow" element={<Slideshow />} />
-            <Route path="/event/:eventId/find-table" element={<FindTablePage />} />
-          </Routes>
-          <Toaster />
-          <DevHelper />
-        </Suspense>
-      </div>
+              <Route path="/host/:eventId/planner" element={<PrivateRoute><PlannerDashboard /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/tasks" element={<PrivateRoute><PlannerTasks /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/timeline" element={<PrivateRoute><PlannerTimeline /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/providers" element={<PrivateRoute><PlannerProviders /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/budget" element={<PrivateRoute><PlannerBudget /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/documents" element={<PrivateRoute><PlannerDocuments /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/venues" element={<PrivateRoute><PlannerVenues /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/catering" element={<PrivateRoute><PlannerCatering /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/gifts" element={<PrivateRoute><PlannerGifts /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/team" element={<PrivateRoute><PlannerTeam /></PrivateRoute>} />
+              <Route path="/host/:eventId/planner/inspiration" element={<PrivateRoute><PlannerInspiration /></PrivateRoute>} />
+
+              <Route path="/event/:eventId" element={<EventLanding />} />
+              <Route path="/invitation/:eventId" element={<InvitationPage />} />
+              <Route path="/event/:eventId/upload" element={<GuestUpload />} />
+              <Route path="/event/:eventId/gallery" element={<EventGallery />} />
+              <Route path="/event/:eventId/guestbook" element={<GuestBook />} />
+              <Route path="/event/:eventId/slideshow" element={<Slideshow />} />
+              <Route path="/event/:eventId/find-table" element={<FindTablePage />} />
+            </Routes>
+            <Toaster />
+            <DevHelper />
+          </Suspense>
+        </div>
+      </QueryClientProvider>
     </>
   );
 }

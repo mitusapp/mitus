@@ -1,5 +1,5 @@
 // src/pages/ProfilePage.jsx
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -22,6 +22,9 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 import ProfileTabsNav from '@/components/profile/ProfileTabsNav';
 import ProfileHeaderBar from '@/components/profile/ProfileHeaderBar';
 
+// 🔻 React Query
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+
 const eventTypeLabels = {
   boda: 'Boda',
   quince: 'Quince Años',
@@ -32,93 +35,152 @@ const eventTypeLabels = {
   otro: 'Otro Evento',
 };
 
-const normalizeText = (text = '') => {
-  if (!text) return '';
-  return text
+const normalizeText = (text = '') =>
+  (text || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+
+const fetchProfile = async (userId) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('full_name, email, avatar_url, phone')
+    .eq('id', userId)
+    .single();
+  if (error && error.code !== 'PGRST116') throw error;
+  return data;
+};
+
+const fetchEvents = async (userId) => {
+  const { data, error } = await supabase
+    .from('events')
+    .select(`
+      id, title, date, cover_image_url, event_type, event_type_label, invitation_details,
+      planner_tasks ( status, due_date )
+    `)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return data || [];
 };
 
 const ProfilePage = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
-  const [sort, setSort] = useState('upcoming');
-  const [searchQuery, setSearchQuery] = useState('');
-
+  const queryClient = useQueryClient();
   const { isDevHelperVisible, setIsDevHelperVisible } = useDevHelper();
 
-  const fetchProfileAndEvents = useCallback(async () => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const { data: profileData, error: profileError } = await supabase
-        .from('users')
-        .select('full_name, email, avatar_url, phone')
-        .eq('id', user.id)
-        .single();
+  // === Queries ===
+  const {
+    data: profile,
+    isLoading: profileLoading,
+  } = useQuery({
+    queryKey: ['profile', user?.id],
+    queryFn: () => fetchProfile(user.id),
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000, // 5 min
+  });
 
-      if (profileError && profileError.code !== 'PGRST116') throw profileError;
-      setProfile(profileData);
+  const {
+    data: rawEvents,
+    isLoading: eventsLoading,
+  } = useQuery({
+    queryKey: ['events', user?.id],
+    queryFn: () => fetchEvents(user.id),
+    enabled: !!user,
+    staleTime: 2 * 60 * 1000, // 2 min
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    // refetchOnMount: 'always',
+  });
 
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select(`
-          id, title, date, cover_image_url, event_type, event_type_label, invitation_details,
-          planner_tasks ( status, due_date )
-        `)
-        .eq('user_id', user.id);
-
-      if (eventsError) throw eventsError;
-
-      const eventsWithDetails = eventsData.map((event) => {
-        const tasks = event.planner_tasks || [];
-        const totalTasks = tasks.length;
-        const completedTasks = tasks.filter((t) => t.status === 'completed').length;
-        const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-        const upcomingTasks = tasks
-          .filter((t) => t.status !== 'completed' && t.due_date)
-          .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
-        const next_task_due = upcomingTasks.length > 0 ? upcomingTasks[0].due_date : null;
-        return { ...event, progress, next_task_due };
-      });
-
-      setEvents(eventsWithDetails);
-    } catch (error) {
-      console.error('Error fetching profile and events:', error);
-      toast({
-        title: 'Error al cargar datos',
-        description: 'No se pudo obtener la información. Intenta de nuevo.',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
+  // ✅ Escuchar cambios desde el Wizard (crear/editar) y refrescar lista
   useEffect(() => {
-    fetchProfileAndEvents();
-  }, [fetchProfileAndEvents]);
+    const onEventsChanged = (e) => {
+      const d = e?.detail || {};
+      if (!user?.id || !d?.id) {
+        // Igual forzamos un refetch por si acaso
+        queryClient.invalidateQueries({ queryKey: ['events', user?.id] });
+        return;
+      }
+
+      // 🟣 Actualización optimista del caché
+      queryClient.setQueryData(['events', user.id], (prev) => {
+        if (!Array.isArray(prev)) return prev;
+
+        const idx = prev.findIndex((ev) => ev.id === d.id);
+        if (idx >= 0) {
+          const current = prev[idx] || {};
+          const currentInv = current.invitation_details || {};
+          const next = {
+            ...current,
+            title: d.title ?? current.title,
+            date: d.date ?? current.date,
+            event_type: d.event_type ?? current.event_type,
+            cover_image_url: d.cover_image_url ?? current.cover_image_url,
+            invitation_details: {
+              ...currentInv,
+              hosts: Array.isArray(d.hosts) ? d.hosts : (currentInv.hosts || []),
+            },
+          };
+          const copy = prev.slice();
+          copy[idx] = next;
+          return copy;
+        }
+
+        // Si es inserción y no está en la lista, lo agregamos arriba
+        if (d.kind === 'insert') {
+          const added = {
+            id: d.id,
+            title: d.title || '',
+            date: d.date || '',
+            event_type: d.event_type || '',
+            cover_image_url: d.cover_image_url || null,
+            invitation_details: { hosts: Array.isArray(d.hosts) ? d.hosts : [] },
+            planner_tasks: [],
+          };
+          return [added, ...prev];
+        }
+
+        return prev;
+      });
+
+      // 🔁 Y luego refetch para tener datos 100% consistentes del servidor
+      queryClient.invalidateQueries({ queryKey: ['events', user.id] });
+    };
+
+    window.addEventListener('events:changed', onEventsChanged);
+    return () => window.removeEventListener('events:changed', onEventsChanged);
+  }, [queryClient, user?.id]);
+
+  // === Derivados y UI ===
+  const events = useMemo(() => {
+    const list = rawEvents || [];
+    return list.map((event) => {
+      const tasks = event.planner_tasks || [];
+      const total = tasks.length;
+      const done = tasks.filter((t) => t.status === 'completed').length;
+      const progress = total > 0 ? Math.round((done / total) * 100) : 0;
+      const upcoming = tasks
+        .filter((t) => t.status !== 'completed' && t.due_date)
+        .sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+      const next_task_due = upcoming.length ? upcoming[0].due_date : null;
+      return { ...event, progress, next_task_due };
+    });
+  }, [rawEvents]);
+
+  const [filter, setFilter] = React.useState('all');
+  const [sort, setSort] = React.useState('upcoming');
+  const [searchQuery, setSearchQuery] = React.useState('');
 
   const filteredAndSortedEvents = useMemo(() => {
     let result = [...events];
 
     if (searchQuery) {
-      const normalizedQuery = normalizeText(searchQuery);
+      const q = normalizeText(searchQuery);
       result = result.filter((event) => {
         const hosts = event.invitation_details?.hosts?.join(' ') || '';
         const title = event.title || '';
-        return (
-          normalizeText(hosts).includes(normalizedQuery) ||
-          normalizeText(title).includes(normalizedQuery)
-        );
+        return normalizeText(hosts).includes(q) || normalizeText(title).includes(q);
       });
     }
 
@@ -156,16 +218,11 @@ const ProfilePage = () => {
       case 'progress-asc':
         result.sort((a, b) => a.progress - b.progress);
         break;
-      case 'urgent-tasks':
-        result.sort((a, b) => {
-          const dateA = a.next_task_due ? new Date(a.next_task_due) : Infinity;
-          const dateB = b.next_task_due ? new Date(b.next_task_due) : Infinity;
-          if (dateA === Infinity && dateB === Infinity) return 0;
-          if (dateA === Infinity) return 1;
-          if (dateB === Infinity) return -1;
-          return dateA - dateB;
-        });
+      case 'urgent-tasks': {
+        const toDate = (d) => (d ? new Date(d) : new Date(8640000000000000)); // Infinity date
+        result.sort((a, b) => toDate(a.next_task_due) - toDate(b.next_task_due));
         break;
+      }
       default:
         break;
     }
@@ -174,44 +231,31 @@ const ProfilePage = () => {
 
   const handleDeleteEvent = async (eventId, e) => {
     e.stopPropagation();
-    if (
-      !window.confirm(
-        '¿Estás seguro de que quieres eliminar este evento? Esta acción es irreversible.'
-      )
-    )
-      return;
-    const { error } = await supabase.functions.invoke('delete-event', {
-      body: { eventId },
-    });
-    if (error)
+    if (!window.confirm('¿Estás seguro de que quieres eliminar este evento? Esta acción es irreversible.')) return;
+
+    const { error } = await supabase.functions.invoke('delete-event', { body: { eventId } });
+    if (error) {
       toast({ title: 'Error al eliminar', description: error.message, variant: 'destructive' });
-    else {
+    } else {
       toast({ title: 'Evento eliminado' });
-      fetchProfileAndEvents();
+      // ✅ invalidar y refrescar lista
+      queryClient.invalidateQueries({ queryKey: ['events', user.id] });
     }
   };
+
+  if (profileLoading || eventsLoading) return <LoadingSpinner />;
 
   const getInitials = (name) => {
     if (!name) return '?';
     const parts = name.split(/&|y/i).map((p) => p.trim());
-    if (parts.length > 1) {
-      return `${parts[0][0]} & ${parts[1][0]}`.toUpperCase();
-    }
+    if (parts.length > 1) return `${parts[0][0]} & ${parts[1][0]}`.toUpperCase();
     return name[0].toUpperCase();
   };
-
-  if (loading) {
-    return <LoadingSpinner />;
-  }
 
   return (
     <div className="min-h-screen bg-white py-8 px-4">
       <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
           {/* === Barra superior: identidad a la izquierda / acciones a la derecha === */}
           <ProfileHeaderBar
             profile={profile}
@@ -222,6 +266,7 @@ const ProfilePage = () => {
 
           {/* === Barra de navegación sticky === */}
           <ProfileTabsNav />
+          <div className="mt-6" />   {/* 24px aprox */}
 
           {/* === Cabecera existente === */}
           <div className="flex justify-between items-center mb-8 flex-wrap gap-4">
@@ -274,6 +319,7 @@ const ProfilePage = () => {
                 </Button>
               </div>
             </div>
+
             <div className="flex gap-2 mb-6">
               <select
                 value={filter}
@@ -300,6 +346,7 @@ const ProfilePage = () => {
                 <option value="urgent-tasks">Tareas Urgentes</option>
               </select>
             </div>
+
             {filteredAndSortedEvents.length > 0 ? (
               <div className="space-y-6">
                 {filteredAndSortedEvents.map((event) => {
@@ -335,9 +382,7 @@ const ProfilePage = () => {
                         <div>
                           <div className="flex justify-between items-start">
                             <p className="text-sm font-semibold text-[#B9A7F9] mb-1">
-                              {eventTypeLabels[event.event_type] ||
-                                event.event_type_label ||
-                                'Evento'}
+                              {eventTypeLabels[event.event_type] || event.event_type_label || 'Evento'}
                             </p>
                             <Button
                               size="icon"
@@ -365,9 +410,7 @@ const ProfilePage = () => {
                             <span className="text-xs font-semibold text-[#8C8C8C] flex items-center gap-1">
                               <Percent className="w-3 h-3" /> Avance
                             </span>
-                            <span className="text-xs font-bold text-[#1E1E1E]">
-                              {event.progress}%
-                            </span>
+                            <span className="text-xs font-bold text-[#1E1E1E]">{event.progress}%</span>
                           </div>
                           <div className="w-full bg-[#F8F3F2] rounded-full h-2">
                             <motion.div
@@ -385,12 +428,8 @@ const ProfilePage = () => {
               </div>
             ) : (
               <div className="text-center py-16 px-6 bg-white rounded-2xl border border-dashed border-[#DCD9D6]">
-                <h3 className="text-2xl font-semibold text-[#1E1E1E]">
-                  No hay eventos que coincidan
-                </h3>
-                <p className="text-[#5E5E5E] mt-2 mb-6">
-                  Prueba a cambiar los filtros o crea un nuevo evento.
-                </p>
+                <h3 className="text-2xl font-semibold text-[#1E1E1E]">No hay eventos que coincidan</h3>
+                <p className="text-[#5E5E5E] mt-2 mb-6">Prueba a cambiar los filtros o crea un nuevo evento.</p>
               </div>
             )}
           </div>
