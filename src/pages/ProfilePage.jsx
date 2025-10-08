@@ -63,6 +63,19 @@ const fetchEvents = async (userId) => {
   return data || [];
 };
 
+// Helpers para calcular etiqueta de días restantes
+const startOfDay = (d) => {
+  const nd = new Date(d);
+  nd.setHours(0, 0, 0, 0);
+  return nd;
+};
+const daysUntil = (dateStr) => {
+  const today = startOfDay(new Date());
+  const eventDate = startOfDay(new Date(dateStr.replace(/-/g, '/')));
+  const diffMs = eventDate - today;
+  return Math.floor(diffMs / 86400000); // 0 = hoy, 1 = falta 1 día, >1 faltan n días, <0 pasado
+};
+
 const ProfilePage = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -285,12 +298,15 @@ const ProfilePage = () => {
               <Button
                 onClick={() => navigate('/settings')}
                 variant="outline"
-                className="border-[#DCD9D6] text-[#DCD9D6] hover:bg-[#F8F3F2]"
+                className="border-slate-300 text-slate-600 hover:bg-slate-50"
               >
                 <Settings className="w-4 h-4 mr-2" />
                 Configuraciones
               </Button>
-              <Button onClick={signOut} variant="destructive">
+              <Button
+                onClick={signOut}
+                variant="destructive"
+              >
                 <LogOut className="w-4 h-4 mr-2" />
                 Cerrar Sesión
               </Button>
@@ -312,7 +328,7 @@ const ProfilePage = () => {
                 </div>
                 <Button
                   onClick={() => navigate('/wizard')}
-                  className="bg-gradient-to-r from-[#B9A7F9] to-[#E8A4B8] text-white flex-shrink-0"
+                  className="bg-gradient-to-r from-[#8ABBD6] to-[#A9D8C5] text-white flex-shrink-0"
                 >
                   <Sparkles className="w-4 h-4 mr-2" />
                   Crear Evento
@@ -352,6 +368,8 @@ const ProfilePage = () => {
                 {filteredAndSortedEvents.map((event) => {
                   const hosts = event.invitation_details?.hosts?.join(' y ');
                   const eventDate = new Date(event.date.replace(/-/g, '/'));
+                  const until = daysUntil(event.date);
+
                   return (
                     <motion.div
                       key={event.id}
@@ -359,7 +377,7 @@ const ProfilePage = () => {
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.4 }}
                       onClick={() => navigate(`/host/${event.id}`)}
-                      className="bg-white rounded-2xl overflow-hidden border border-[#F8F3F2] hover:border-[#B9A7F9] hover:shadow-lg hover:-translate-y-1 transition-all duration-300 group cursor-pointer flex"
+                      className="bg-white rounded-2xl overflow-hidden border border-[#E6ECEF] hover:border-[#A8C5DA] hover:shadow-lg hover:-translate-y-1 hover:bg-gradient-to-br hover:from-[#F3F8FC] hover:to-[#F2FBF6] transition-all duration-300 group cursor-pointer flex"
                     >
                       <div className="w-1/3 relative">
                         {event.cover_image_url ? (
@@ -369,9 +387,10 @@ const ProfilePage = () => {
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#B9A7F9]/20 to-[#E8A4B8]/20">
-                            <div className="w-24 h-24 rounded-full border-2 border-white/50 flex items-center justify-center">
-                              <span className="text-4xl font-bold text-white/80">
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#DDE9F3] to-[#E9F6F0]">
+                            <div className="w-32 h-32 rounded-full border-2 border-white/60 flex items-center justify-center">
+                              <span className="font-bold text-slate-700 leading-none text-center
+                                 text-[clamp(20px,4.2vw,38px)]">
                                 {getInitials(hosts || event.title)}
                               </span>
                             </div>
@@ -381,9 +400,13 @@ const ProfilePage = () => {
                       <div className="p-6 flex-grow flex flex-col justify-between w-2/3">
                         <div>
                           <div className="flex justify-between items-start">
-                            <p className="text-sm font-semibold text-[#B9A7F9] mb-1">
-                              {eventTypeLabels[event.event_type] || event.event_type_label || 'Evento'}
-                            </p>
+                            {/* 🔁 Anfitriones arriba SIN fondo (manteniendo tamaño anterior, prominente) */}
+                            <div className="inline-flex items-center">
+                              <span className="text-xl md:text-2xl font-semibold text-slate-900 truncate max-w-[60vw] md:max-w-[36rem]">
+                                {hosts || event.title}
+                              </span>
+                            </div>
+
                             <Button
                               size="icon"
                               variant="ghost"
@@ -393,18 +416,33 @@ const ProfilePage = () => {
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           </div>
-                          <h3 className="text-2xl font-bold text-[#1E1E1E] mb-2 truncate">
-                            {hosts || event.title}
-                          </h3>
+
+                          {/* Tipo de evento debajo del nombre */}
+                          <p className="text-sm font-semibold text-slate-500 mt-2 mb-2">
+                            {eventTypeLabels[event.event_type] || event.event_type_label || 'Evento'}
+                          </p>
+
+                          {/* Fecha + etiqueta de días restantes */}
                           <p className="text-[#5E5E5E] flex items-center gap-2 text-sm mb-2">
-                            <Calendar className="w-4 h-4 text-[#B9A7F9]" />
+                            <Calendar className="w-4 h-4 text-[#8ABBD6]" />
                             {eventDate.toLocaleDateString('es-ES', {
                               year: 'numeric',
                               month: 'long',
                               day: 'numeric',
                             })}
                           </p>
+                          {until >= 0 && (
+                            <span className="inline-flex items-center text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                              {until === 0
+                                ? 'Hoy'
+                                : until === 1
+                                  ? 'Falta 1 día'
+                                  : `Faltan ${until} días`}
+                            </span>
+                          )}
                         </div>
+
+                        {/* Barra de avance con degradado neutral */}
                         <div className="mt-4">
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-semibold text-[#8C8C8C] flex items-center gap-1">
@@ -412,9 +450,9 @@ const ProfilePage = () => {
                             </span>
                             <span className="text-xs font-bold text-[#1E1E1E]">{event.progress}%</span>
                           </div>
-                          <div className="w-full bg-[#F8F3F2] rounded-full h-2">
+                          <div className="w-full bg-slate-100 rounded-full h-2">
                             <motion.div
-                              className="bg-gradient-to-r from-[#B9A7F9] to-[#E8A4B8] h-2 rounded-full"
+                              className="bg-gradient-to-r from-[#A8C5DA] to-[#BFDCD1] h-2 rounded-full"
                               initial={{ width: 0 }}
                               animate={{ width: `${event.progress}%` }}
                               transition={{ duration: 1, delay: 0.5 }}
