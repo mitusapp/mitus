@@ -11,6 +11,8 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 
 // 🔹 Registro dinámico de pasos (icono + componente + título)
 import { steps } from '@/pages/invitation-wizard/steps';
+export { steps as wizardSteps } from '@/pages/invitation-wizard/steps';
+
 
 const initialData = {
   eventType: '',

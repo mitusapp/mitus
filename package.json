@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "vite --host :: --port 3000",
-    "build": "node tools/generate-llms.js || true && vite build",
+    "prebuild": "node tools/generate-llms.js || echo skipped",
+    "build": "vite build",
     "preview": "vite preview --host :: --port 3000"
   },
   "dependencies": {
