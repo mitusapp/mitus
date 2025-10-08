@@ -7,15 +7,17 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 // import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 const PrivateRoute = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { session, loading } = useAuth();
   const location = useLocation();
 
   if (loading) return <LoadingSpinner />;
 
-  if (!user) {
+  if (!session) {
+    // Guarda la ruta a la que intentaba ir para redirigir tras login
     const target = location.pathname + location.search + location.hash;
     try { sessionStorage.setItem('postLoginRedirect', target); } catch {}
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    // ⬅️ Ahora redirige al HOME ("/") cuando no hay sesión
+    return <Navigate to="/" replace state={{ from: location }} />;
   }
 
   return children;

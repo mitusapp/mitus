@@ -141,20 +141,32 @@ export const AuthProvider = ({ children }) => {
     return { data, error: null };
   }, [toast]);
 
+  /**
+   * Cerrar sesión robusto:
+   * - Intenta revocar en servidor (scope: 'global').
+   * - Si la sesión ya no existe (403 session_not_found), lo tratamos como “ya estabas fuera”.
+   * - Siempre limpia estado local y navega al Home.
+   */
   const signOut = useCallback(async () => {
     setLoading(true);
-    const { error } = await supabase.auth.signOut();
-    handleSessionChange(null);
-    if (error && error.code !== 'session_not_found') {
-      toast({
-        variant: 'destructive',
-        title: 'Error al cerrar sesión',
-        description: error.message,
-      });
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'global' });
+      if (error && error.code !== 'session_not_found') {
+        throw error;
+      }
+    } catch (e) {
+      const msg = String(e?.message || e?.msg || e || '');
+      if (!msg.includes('session_not_found')) {
+        console.error('Error al cerrar sesión:', e);
+      }
+    } finally {
+      // Limpieza local garantizada
+      try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
+      handleSessionChange(null);
+      navigate('/', { replace: true });
+      setLoading(false);
     }
-    navigate('/', { replace: true });
-    setLoading(false);
-  }, [toast, navigate, handleSessionChange]);
+  }, [navigate, handleSessionChange]);
 
   const value = useMemo(() => ({
     user,

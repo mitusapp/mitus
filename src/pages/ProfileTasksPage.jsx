@@ -8,6 +8,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ProfileTabsNav from '@/components/profile/ProfileTabsNav';
 import ProfileHeaderBar from '@/components/profile/ProfileHeaderBar';
+import TasksPaymentsSummary from '@/components/profile/TasksPaymentsSummary';
 
 const SORT_DIR = { ASC: 'asc', DESC: 'desc' };
 
@@ -171,9 +172,9 @@ const ProfileTasksPage = () => {
             pendiente: 'Pago',
             client: meta.client || '—',
             tipo: meta.tipo || '—',
-            task: `Pago a ${proveedor}`,   // << cambio: "Pago a ..."
-            provider: proveedor,           // lo mantenemos para búsquedas
-            amount: s.amount ?? null,      // << añadimos amount para mostrar en paréntesis
+            task: `Pago a ${proveedor}`,
+            provider: proveedor,
+            amount: s.amount ?? null,
             due: s.due_date || null,
             prioridad: s.priority || bi.priority || null,
             owner: responsable,
@@ -321,6 +322,9 @@ const ProfileTasksPage = () => {
               />
             </div>
           </div>
+
+          {/* === RESUMEN (TASKS + PAYMENT SCHEDULES) === */}
+          <TasksPaymentsSummary items={items} initialRange="week" />
 
           {/* === LISTA === */}
           <div className="bg-white rounded-2xl border border-[#DCD9D6]">
