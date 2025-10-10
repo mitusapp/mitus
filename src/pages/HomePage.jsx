@@ -1,3 +1,4 @@
+// src/pages/HomePage.jsx
 import React, { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -13,9 +14,29 @@ const HomePage = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
 
-  // ✅ Si ya hay sesión, enviamos directo al dashboard
+  // ✅ Si ya hay sesión, enviar al destino correcto:
+  //    1) postLoginRedirect (si existe)
+  //    2) lastVisitedPath (si existe y no es público)
+  //    3) /profile (comportamiento actual)
   useEffect(() => {
     if (!loading && user) {
+      try {
+        const pending = sessionStorage.getItem('postLoginRedirect');
+        if (pending) {
+          sessionStorage.removeItem('postLoginRedirect');
+          navigate(pending, { replace: true });
+          return;
+        }
+        const last = sessionStorage.getItem('lastVisitedPath');
+        if (last) {
+          const path = new URL(last, window.location.origin).pathname;
+          const isPublic = path === '/' || path === '/login' || path === '/signup' || path === '/signup-confirm' || path === '/reset-password';
+          if (!isPublic) {
+            navigate(last, { replace: true });
+            return;
+          }
+        }
+      } catch {}
       navigate('/profile', { replace: true });
     }
   }, [loading, user, navigate]);

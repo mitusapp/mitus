@@ -15,10 +15,33 @@ import {
    ========================= */
 const asLocalDay = (d) => {
   if (!d) return null;
-  const dd = typeof d === 'string' ? new Date(d.replace(/-/g, '/')) : new Date(d);
-  if (Number.isNaN(dd.getTime())) return null;
-  dd.setHours(0, 0, 0, 0);
-  return dd;
+
+  // Si viene Date, normaliza a 00:00 local
+  if (d instanceof Date) {
+    if (Number.isNaN(d.getTime())) return null;
+    const dd = new Date(d);
+    dd.setHours(0, 0, 0, 0);
+    return dd;
+  }
+
+  // Si viene string:
+  if (typeof d === 'string') {
+    // Solo fecha YYYY-MM-DD -> construir en local (evita que el navegador lo tome como UTC)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const [y, m, day] = d.split('-').map(Number);
+      const dd = new Date(y, m - 1, day);
+      dd.setHours(0, 0, 0, 0);
+      return dd;
+    }
+
+    // ISO completo u otros formatos válidos -> usar sin reemplazar
+    const dd = new Date(d);
+    if (Number.isNaN(dd.getTime())) return null;
+    dd.setHours(0, 0, 0, 0);
+    return dd;
+  }
+
+  return null;
 };
 
 const todayStart = () => {
@@ -85,19 +108,16 @@ const inRange = (date, range) => {
 /* =========================
    Agregador
    ========================= */
-/**
- * items: ver ProfileTasksPage (task + payment items)
- */
 const aggregate = (items = [], rangeKey = 'week') => {
   const rng = computeRange(rangeKey);
   const today = todayStart();
 
-  // Estructuras
+  // Estructuras POR RANGO (para totales superiores y top responsables)
   const rangeAgg = {
     tareas: {
       total: 0,
       porPrioridad: { alta: 0, media: 0, baja: 0 },
-      responsables: {}, // name -> count
+      responsables: {}, // name -> count (solo tareas, dentro del periodo)
     },
     pagos: {
       totalMonto: 0,
@@ -123,7 +143,11 @@ const aggregate = (items = [], rangeKey = 'week') => {
   };
 
   const vencidosGlobal = { tareas: 0, pagosCount: 0, pagosMonto: 0 };
-  const porProveedorMap = {}; // global
+
+  // Vencidas por responsable (GLOBAL respecto a hoy; útil para ver riesgo)
+  const overdueByOwner = {}; // name -> count
+
+  const porProveedorMap = {}; // global (pagos por proveedor)
 
   // Helpers de bucket global
   const pushTaskGlobal = (d) => {
@@ -149,7 +173,7 @@ const aggregate = (items = [], rangeKey = 'week') => {
   for (const it of items) {
     const due = asLocalDay(it.due);
 
-    // RANGO (para totales superiores)
+    // POR RANGO (para totales superiores y top)
     if (due ? inRange(due, rng) : rangeKey === 'all') {
       if (it.kind === 'task') {
         rangeAgg.tareas.total += 1;
@@ -169,7 +193,11 @@ const aggregate = (items = [], rangeKey = 'week') => {
     // GLOBAL (siempre)
     if (it.kind === 'task') {
       pushTaskGlobal(due);
-      if (due && due < today) vencidosGlobal.tareas += 1;
+      if (due && due < today) {
+        vencidosGlobal.tareas += 1;
+        const owner = it.owner || 'Sin responsable';
+        overdueByOwner[owner] = (overdueByOwner[owner] || 0) + 1;
+      }
     }
 
     if (it.kind === 'payment') {
@@ -185,12 +213,6 @@ const aggregate = (items = [], rangeKey = 'week') => {
     }
   }
 
-  // Top N
-  const responsablesTop = Object.entries(rangeAgg.tareas.responsables)
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
   const porProveedor = Object.entries(porProveedorMap)
     .map(([name, monto]) => ({ name, monto }))
     .sort((a, b) => b.monto - a.monto)
@@ -203,6 +225,7 @@ const aggregate = (items = [], rangeKey = 'week') => {
     globalPayBuckets,
     vencidosGlobal,
     porProveedor,
+    overdueByOwner, // para mostrar vencidas por responsable
   };
 };
 
@@ -252,7 +275,7 @@ const TasksPaymentsSummary = ({ items = [], initialRange = 'week', currency = 'C
 
       {/* Content */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4">
-        {/* Card: Tareas pendientes (totales POR RANGO, breakdown GLOBAL para vencidas/hoy/semana) */}
+        {/* Card: Tareas pendientes */}
         <div className="rounded-xl border border-[#E6ECEF] p-4 bg-gradient-to-br from-[#F3F8FC] to-[#F2FBF6]">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-[#5E5E5E] flex items-center gap-2">
@@ -290,7 +313,7 @@ const TasksPaymentsSummary = ({ items = [], initialRange = 'week', currency = 'C
           </div>
         </div>
 
-        {/* Card: Pagos pendientes (monto POR RANGO, breakdown GLOBAL de semana/mes/6M/año) */}
+        {/* Card: Pagos pendientes */}
         <div className="rounded-xl border border-[#E6ECEF] p-4 bg-white">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-[#5E5E5E] flex items-center gap-2">
@@ -379,11 +402,32 @@ const TasksPaymentsSummary = ({ items = [], initialRange = 'week', currency = 'C
             {Object.entries(data.rangeAgg.tareas.responsables)
               .sort((a, b) => b[1] - a[1])
               .slice(0, 5)
-              .map(([name, count]) => (
-                <span key={name} className="text-xs bg-[#F3F8FC] border border-[#E6ECEF] px-2 py-1 rounded-md">
-                  {name}: <span className="font-semibold text-[#1E1E1E]">{count}</span>
-                </span>
-              ))}
+              .map(([name, count]) => {
+                const total = data.rangeAgg.tareas.total || 0;
+                const pct = total ? Math.round((count * 100) / total) : 0;
+                const overdue = data.overdueByOwner[name] || 0;
+                const labelName = name || 'Sin responsable';
+                return (
+                  <span
+                    key={labelName}
+                    className="text-xs bg-[#F3F8FC] border border-[#E6ECEF] px-2 py-1 rounded-md
+                               inline-flex items-center gap-1 max-w-[16rem] min-w-0"
+                    title={`${labelName}: ${count} tarea(s) pendientes en este periodo${overdue ? ` · ${overdue} vencida(s)` : ''}`}
+                  >
+                    <span className="truncate overflow-hidden whitespace-nowrap max-w-[9rem] text-[#1E1E1E]">
+                      {labelName}
+                    </span>
+                    <span className="font-semibold text-[#1E1E1E]">· {count}</span>
+                    <span className="text-[#7B7B7B]">({pct}%)</span>
+                    {overdue > 0 && (
+                      <span className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded-full
+                                       bg-red-50 text-red-600 border border-red-200">
+                        {overdue} venc.
+                      </span>
+                    )}
+                  </span>
+                );
+              })}
           </div>
         )}
       </div>

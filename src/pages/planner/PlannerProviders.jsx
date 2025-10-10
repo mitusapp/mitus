@@ -1,40 +1,75 @@
 // src/pages/planner/PlannerProviders.jsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Plus, Trash2, Search, ArrowLeft, ExternalLink } from 'lucide-react';
+import { Plus, Search, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
-/** Catálogo normalizado: service_type → etiqueta visible */
+import ProvidersList from '../../components/planner/ProvidersList.jsx';
+import ProviderFormModal from '../../components/planner/ProviderFormModal.jsx';
+
+/** Catálogo normalizado: service_type → etiqueta visible (enfocado en eventos sociales) */
 const SERVICE_TYPES = [
+  { value: 'wedding_planner', label: 'Organizador/a de bodas' },
   { value: 'photography', label: 'Fotografía' },
   { value: 'video', label: 'Video' },
-  { value: 'music', label: 'Música / DJ' },
-  { value: 'catering', label: 'Catering / Bebidas' },
-  { value: 'decoration', label: 'Decoración / Floristería' },
-  { value: 'rentals', label: 'Alquileres / Mobiliario' },
-  { value: 'beauty', label: 'Maquillaje / Peinado' },
-  { value: 'cake', label: 'Pastel / Postres' },
-  { value: 'lighting_sound', label: 'Iluminación / Sonido' },
+  { value: 'photo_video', label: 'Foto y Video' },
+  { value: 'music_dj', label: 'Música / DJ' },
+  { value: 'live_band', label: 'Banda en vivo' },
+  { value: 'mc_animacion', label: 'Maestro de ceremonia / Animación' },
+  { value: 'lighting_sound', label: 'Luces y sonido' },
+  { value: 'florist', label: 'Flores / Floristería' },
+  { value: 'decor_rentals', label: 'Decoración / Alquileres' },
+  { value: 'catering', label: 'Catering / Banquete' },
+  { value: 'cake_desserts', label: 'Torta y Postres' },
+  { value: 'bar_beverages', label: 'Bar y Bebidas' },
+  { value: 'beauty', label: 'Maquillaje y peinado' },
+  { value: 'attire', label: 'Vestuario y accesorios' },
+  { value: 'officiant', label: 'Oficiante' },
   { value: 'transport', label: 'Transporte' },
-  { value: 'stationery', label: 'Papelería / Invitaciones' },
-  { value: 'planning', label: 'Planeación / Coordinación' },
-  { value: 'venue', label: 'Locación / Venue' },
+  { value: 'security', label: 'Seguridad' },
+  { value: 'kids_babysitting', label: 'Niñera / Zona infantil' },
+  { value: 'venue', label: 'Lugar / Venue' },
+  { value: 'invitations', label: 'Invitaciones / Papelería' },
+  { value: 'photobooth', label: 'Cabina de fotos' },
+  { value: 'fireworks', label: 'Pirotecnia' },
+  { value: 'av_production', label: 'Producción / A.V.' },
   { value: 'other', label: 'Otro' },
 ];
 
-const labelFromServiceType = (st) =>
-  SERVICE_TYPES.find((s) => s.value === st)?.label || (st ?? '—');
+/** Estado por evento (se muestra en español) */
+const EVENT_STATUS = [
+  { value: 'tentative', label: 'Tentativo' },
+  { value: 'contacted', label: 'Contactado' },
+  { value: 'quoted', label: 'Cotizado' },
+  { value: 'booked', label: 'Reservado' },
+  { value: 'confirmed', label: 'Confirmado' },
+  { value: 'cancelled', label: 'Cancelado' },
+];
 
-const STATUS = ['tentative', 'confirmed', 'declined'];
+/** util */
+const labelFromServiceType = (value) =>
+  SERVICE_TYPES.find((s) => s.value === value)?.label || null;
+const labelFromEventStatus = (value) =>
+  EVENT_STATUS.find((s) => s.value === value)?.label || value;
 
+// Etiquetas del tipo de evento (como en ProfilePage.jsx)
+const EVENT_TYPE_LABELS = {
+  boda: 'Boda',
+  quince: 'Quince Años',
+  cumpleanos: 'Cumpleaños',
+  corporativo: 'Corporativo',
+  babyshower: 'Baby Shower',
+  aniversario: 'Aniversario',
+  otro: 'Otro Evento',
+};
+
+/** formulario base */
 const emptyForm = {
+  id: null,
   name: '',
-  // category desaparece del formulario visible; se sincroniza con service_type para compatibilidad
   service_type: 'other',
   contact_name: '',
   email: '',
@@ -43,144 +78,7 @@ const emptyForm = {
   instagram: '',
   notes: '',
   location: '',
-  status: 'tentative',
-};
-
-const ProviderForm = ({ open, onOpenChange, onSubmit, form, setForm, saving }) => {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-slate-800/95 text-white border border-green-500">
-        <DialogHeader>
-          <DialogTitle className="text-2xl">Nuevo proveedor</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid md:grid-cols-2 gap-4 py-2">
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Nombre del negocio</label>
-            <input
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="Ej. Ignacio Ramírez Fotografía"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Categoría</label>
-            <select
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              value={form.service_type}
-              onChange={(e) => setForm({ ...form, service_type: e.target.value })}
-            >
-              {SERVICE_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Contacto</label>
-            <input
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="Nombre de la persona de contacto"
-              value={form.contact_name}
-              onChange={(e) => setForm({ ...form, contact_name: e.target.value })}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Teléfono</label>
-              <input
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                placeholder="+57 300 000 0000"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-300 mb-1">Email</label>
-              <input
-                type="email"
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                placeholder="contacto@proveedor.com"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Sitio web</label>
-            <input
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="https://…"
-              value={form.website}
-              onChange={(e) => setForm({ ...form, website: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Instagram</label>
-            <input
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="@usuario"
-              value={form.instagram}
-              onChange={(e) => setForm({ ...form, instagram: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Ubicación</label>
-            <input
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="Ciudad / País"
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm text-gray-300 mb-1">Estado</label>
-            <select
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-            >
-              {['tentative', 'confirmed', 'declined'].map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-sm text-gray-300 mb-1">Notas</label>
-            <textarea
-              rows={3}
-              className="w-full p-2 rounded bg-white/10 border border-white/20"
-              placeholder="Información adicional, peticiones, etc."
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={onSubmit} disabled={saving} className="bg-green-600 hover:bg-green-700">
-            {saving ? 'Guardando…' : 'Guardar'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+  event_status: 'tentative', // por evento
 };
 
 const PlannerProviders = () => {
@@ -188,24 +86,53 @@ const PlannerProviders = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [openForm, setOpenForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
-  const [rows, setRows] = useState([]);       // proveedores vinculados al evento
-  const [myProviders, setMyProviders] = useState([]); // todos mis proveedores (para reutilizar en el futuro)
+  const [rows, setRows] = useState([]);
+  const [myProviders, setMyProviders] = useState([]);
+
+  // ---- Encabezado: "Boda de Ana y Luis – 25/10/2025"
+  const [eventHeader, setEventHeader] = useState('');
+
+  const formatShortEsDate = (d) => {
+    if (!d) return '';
+    const date = new Date(String(d).replace(/-/g, '/'));
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  const fetchEventInfo = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('id, title, date, event_type, event_type_label, invitation_details')
+        .eq('id', eventId)
+        .single();
+      if (error) throw error;
+
+      const hostsArr = data?.invitation_details?.hosts;
+      const hosts = Array.isArray(hostsArr) && hostsArr.length ? hostsArr.join(' y ') : (data?.title || '');
+      const typeLabel = EVENT_TYPE_LABELS[data?.event_type] || data?.event_type_label || 'Evento';
+      const dateLabel = formatShortEsDate(data?.date);
+
+      const header = `${typeLabel}${hosts ? ` de ${hosts}` : ''}${dateLabel ? ` – ${dateLabel}` : ''}`;
+      setEventHeader(header);
+    } catch {
+      setEventHeader('');
+    }
+  }, [eventId]);
+  // --------------------------------------------------------------------------
 
   const loadProviders = useCallback(async () => {
     if (!user) return;
-
     setLoading(true);
     try {
-      // IMPORTANTE: event_providers no tiene columna id → no la pedimos
       const { data: eventProviders, error: epErr } = await supabase
         .from('event_providers')
-        .select('provider_id, created_at, planner_providers(*)')
+        .select('provider_id, created_at, status, planner_providers(*)')
         .eq('event_id', eventId)
         .order('created_at', { ascending: false });
       if (epErr) throw epErr;
@@ -220,123 +147,148 @@ const PlannerProviders = () => {
       setMyProviders(mine || []);
     } catch (e) {
       console.error(e);
-      toast({ title: 'Error al cargar proveedores', description: e.message, variant: 'destructive' });
+      toast({
+        title: 'Error al cargar proveedores',
+        description: e.message,
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
-  }, [eventId, user]);
+  }, [user, eventId]);
 
-  useEffect(() => {
-    loadProviders();
-  }, [loadProviders]);
+  useEffect(() => { fetchEventInfo(); }, [fetchEventInfo]);
+  useEffect(() => { loadProviders(); }, [loadProviders]);
 
+  // normalizador para búsqueda sin acentos
+  const norm = (s) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+  const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = norm(query.trim());
     if (!q) return rows;
     return rows.filter((r) => {
       const p = r.planner_providers || {};
-      const cat = labelFromServiceType(p.service_type) || p.category || '';
-      const haystack = [
-        p.name || '',
-        cat || '',
-        p.contact_name || '',
-        p.email || '',
-        p.phone || '',
-        p.instagram || '',
-        p.website || '',
-        p.location || '',
-        p.status || '',
-      ]
-        .join(' ')
-        .toLowerCase();
+      const categoryLabel = labelFromServiceType(p.service_type) || '';
+      const haystack = norm(
+        `${p.name ?? ''} ${p.service_type ?? ''} ${categoryLabel} ${p.contact_name ?? ''} ${p.email ?? ''} ${p.phone ?? ''} ${p.instagram ?? ''} ${p.website ?? ''} ${p.location ?? ''} ${r.status ?? ''}`
+      );
       return haystack.includes(q);
     });
-  }, [rows, search]);
+  }, [rows, query]);
 
-  const handleOpenForm = () => {
+  const openCreate = () => {
     setForm(emptyForm);
     setOpenForm(true);
   };
 
-  const handleCreate = async () => {
-    if (!user) return;
-    if (!form.name?.trim()) {
-      toast({ title: 'Falta nombre del proveedor', variant: 'destructive' });
-      return;
-    }
+  const openEdit = (row) => {
+    const p = row?.planner_providers || {};
+    setForm({
+      id: p.id,
+      name: p.name || '',
+      service_type: p.service_type || 'other',
+      contact_name: p.contact_name || '',
+      email: p.email || '',
+      phone: p.phone || '',
+      website: p.website || '',
+      instagram: p.instagram || '',
+      notes: p.notes || '',
+      location: p.location || '',
+      event_status: row.status || 'tentative',
+    });
+    setOpenForm(true);
+  };
 
+  // Crear/editar proveedor y/o vincularlo con status por evento
+  const handleSubmit = async (payload) => {
     setSaving(true);
     try {
-      // 1) crear o reutilizar por (user_id + name)
-      let providerId;
+      const event_status = payload.event_status || 'tentative';
 
-      const { data: existing, error: exErr } = await supabase
-        .from('planner_providers')
-        .select('id')
-        .eq('user_id', user.id)
-        .ilike('name', form.name.trim())
-        .maybeSingle();
-      if (exErr) throw exErr;
+      if (payload._linkOnly && payload.id) {
+        const { error: linkErr } = await supabase
+          .from('event_providers')
+          .insert([{ event_id: eventId, provider_id: payload.id, status: event_status }]);
+        if (linkErr && linkErr.code !== '23505') throw linkErr;
+        if (linkErr && linkErr.code === '23505') {
+          await supabase
+            .from('event_providers')
+            .update({ status: event_status })
+            .eq('event_id', eventId)
+            .eq('provider_id', payload.id);
+        }
+        toast({ title: 'Proveedor vinculado al evento' });
+        setOpenForm(false);
+        await loadProviders();
+        return;
+      }
 
-      if (existing) {
-        providerId = existing.id;
-        // actualizamos datos principales
+      let providerId = payload.id;
+      if (providerId) {
         const { error: updErr } = await supabase
           .from('planner_providers')
           .update({
-            // sincronizamos category por compatibilidad (texto = service_type)
-            category: form.service_type,
-            service_type: form.service_type || 'other',
-            contact_name: form.contact_name || null,
-            email: form.email || null,
-            phone: form.phone || null,
-            website: form.website || null,
-            instagram: form.instagram || null,
-            notes: form.notes || null,
-            location: form.location || null,
-            status: form.status || 'tentative',
+            name: payload.name,
+            service_type: payload.service_type,
+            category: payload.service_type,
+            contact_name: payload.contact_name || null,
+            email: payload.email || null,
+            phone: payload.phone || null,
+            website: payload.website || null,
+            instagram: payload.instagram?.replace(/^@/, '') || null,
+            notes: payload.notes || null,
+            location: payload.location || null,
           })
-          .eq('id', providerId);
+          .eq('id', providerId)
+          .eq('user_id', user.id);
         if (updErr) throw updErr;
       } else {
         const { data: created, error: createErr } = await supabase
           .from('planner_providers')
-          .insert([
-            {
-              user_id: user.id,
-              name: form.name.trim(),
-              // guardamos service_type como categoría normalizada
-              service_type: form.service_type || 'other',
-              // y category textual para compatibilidad con listados antiguos
-              category: form.service_type,
-              contact_name: form.contact_name || null,
-              email: form.email || null,
-              phone: form.phone || null,
-              website: form.website || null,
-              instagram: form.instagram || null,
-              notes: form.notes || null,
-              location: form.location || null,
-              status: form.status || 'tentative',
-            },
-          ])
+          .insert([{
+            user_id: user.id,
+            name: payload.name,
+            service_type: payload.service_type,
+            category: payload.service_type,
+            contact_name: payload.contact_name || null,
+            email: payload.email || null,
+            phone: payload.phone || null,
+            website: payload.website || null,
+            instagram: payload.instagram?.replace(/^@/, '') || null,
+            notes: payload.notes || null,
+            location: payload.location || null,
+          }])
           .select('id')
           .single();
         if (createErr) throw createErr;
         providerId = created.id;
       }
 
-      // 2) vincular al evento (clave compuesta event_id + provider_id)
       const { error: linkErr } = await supabase
         .from('event_providers')
-        .insert([{ event_id: eventId, provider_id: providerId }]);
-      if (linkErr && linkErr.code !== '23505') throw linkErr; // 23505 = ya existe
+        .insert([{ event_id: eventId, provider_id: providerId, status: event_status }]);
+      if (linkErr && linkErr.code === '23505') {
+        const { error: stErr } = await supabase
+          .from('event_providers')
+          .update({ status: event_status })
+          .eq('event_id', eventId)
+          .eq('provider_id', providerId);
+        if (stErr) throw stErr;
+      } else if (linkErr) {
+        throw linkErr;
+      }
 
-      toast({ title: 'Proveedor guardado y vinculado' });
+      toast({ title: payload.id ? 'Proveedor actualizado' : 'Proveedor guardado y vinculado' });
       setOpenForm(false);
       await loadProviders();
     } catch (e) {
       console.error(e);
-      toast({ title: 'Error al crear proveedor', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error al guardar', description: e.message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -350,155 +302,69 @@ const PlannerProviders = () => {
         .eq('event_id', eventId)
         .eq('provider_id', provider_id);
       if (error) throw error;
-
-      toast({ title: 'Proveedor desvinculado del evento' });
+      toast({ title: 'Proveedor desvinculado' });
       await loadProviders();
     } catch (e) {
       console.error(e);
-      toast({ title: 'Error al desvincular', description: e.message, variant: 'destructive' });
+      toast({ title: 'No se pudo desvincular', description: e.message, variant: 'destructive' });
     }
   };
 
   return (
-    <div className="min-h-screen py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center">
-              <Button
-                variant="ghost"
-                onClick={() => navigate(`/host/${eventId}/planner`)}
-                className="text-white hover:bg-white/10 mr-4"
-              >
-                <ArrowLeft />
-              </Button>
-              <h1 className="text-2xl font-bold text-white">Proveedores</h1>
-            </div>
-            <Button onClick={handleOpenForm} className="bg-green-600 hover:bg-green-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Nuevo proveedor
-            </Button>
+    <div className="p-4 md:p-6">
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            onClick={() => navigate(`/host/${eventId}/planner`)}
+            className="text-white hover:bg-white/10 mr-3"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <div>
+            <h1 className="text-2xl font-bold text-white">Proveedores</h1>
+            {eventHeader && (
+              <p className="text-xs sm:text-sm text-gray-300 mt-0.5 break-words">
+                {eventHeader}
+              </p>
+            )}
           </div>
-
-          {/* Buscador */}
-          <div className="relative w-full md:w-96 mb-6">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="search"
-              placeholder="Buscar por nombre, categoría, contacto, email…"
-              className="w-full p-2 pl-9 rounded-lg border border-white/20 bg-white/10 text-sm text-white focus:ring-2 focus:ring-green-600"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-
-          {/* Tabla */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left min-w-[960px]">
-                <thead>
-                  <tr className="border-b border-white/20 text-gray-300 text-sm">
-                    <th className="p-3">Nombre</th>
-                    <th className="p-3">Categoría</th>
-                    <th className="p-3">Contacto</th>
-                    <th className="p-3">Email / Tel</th>
-                    <th className="p-3">Redes / Web</th>
-                    <th className="p-3">Ubicación</th>
-                    <th className="p-3">Estado</th>
-                    <th className="p-3">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!loading &&
-                    filtered.map((r) => {
-                      const p = r.planner_providers || {};
-                      const categoryLabel = labelFromServiceType(p.service_type) || p.category || '—';
-                      return (
-                        <tr key={r.provider_id} className="border-b border-white/10 hover:bg-white/5">
-                          <td className="p-3">
-                            <div className="font-medium text-white">{p.name || '—'}</div>
-                            {p.notes && <div className="text-xs text-gray-400 line-clamp-1">{p.notes}</div>}
-                          </td>
-                          <td className="p-3 text-gray-200">{categoryLabel}</td>
-                          <td className="p-3 text-gray-200">{p.contact_name || '—'}</td>
-                          <td className="p-3 text-gray-200">
-                            <div>{p.email || '—'}</div>
-                            <div className="text-xs text-gray-400">{p.phone || ''}</div>
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-2 text-blue-300">
-                              {p.instagram && (
-                                <a
-                                  href={`https://instagram.com/${p.instagram.replace(/^@/, '')}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="hover:underline inline-flex items-center gap-1"
-                                >
-                                  Instagram <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                              {p.website && (
-                                <a
-                                  href={p.website}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="hover:underline inline-flex items-center gap-1"
-                                >
-                                  Web <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-gray-200">{p.location || '—'}</td>
-                          <td className="p-3">
-                            <span
-                              className={
-                                'px-2 py-1 rounded-full text-xs ' +
-                                (p.status === 'confirmed'
-                                  ? 'bg-green-500/20 text-green-300 border border-green-500/40'
-                                  : p.status === 'declined'
-                                  ? 'bg-red-500/20 text-red-300 border border-red-500/40'
-                                  : 'bg-yellow-500/20 text-yellow-300 border border-yellow-500/40')
-                              }
-                            >
-                              {p.status || 'tentative'}
-                            </span>
-                          </td>
-                          <td className="p-3">
-                            <div className="flex gap-1">
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-red-400"
-                                title="Desvincular del evento"
-                                onClick={() => unlinkProvider(r.provider_id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-
-              {!loading && filtered.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No hay proveedores para mostrar.</p>
-              )}
-              {loading && <p className="text-center text-gray-400 py-8">Cargando…</p>}
-            </div>
-          </div>
-        </motion.div>
+        </div>
+        <Button onClick={openCreate} className="bg-green-600 hover:bg-green-500">
+          <Plus className="w-4 h-4 mr-1" /> Nuevo proveedor
+        </Button>
       </div>
 
-      <ProviderForm
+      <div className="relative mb-4 mt-2">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400 text-white"
+          placeholder="Buscar por nombre, categoría, contacto, email, teléfono…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+
+      <ProvidersList
+        loading={loading}
+        rows={filtered}
+        onEdit={openEdit}
+        onUnlink={unlinkProvider}
+        labelFromServiceType={labelFromServiceType}
+        labelFromEventStatus={labelFromEventStatus}
+      />
+
+      <ProviderFormModal
         open={openForm}
         onOpenChange={setOpenForm}
-        onSubmit={handleCreate}
+        onSubmit={handleSubmit}
         form={form}
         setForm={setForm}
         saving={saving}
+        myProviders={myProviders}
+        serviceTypes={SERVICE_TYPES}
+        eventStatus={EVENT_STATUS}
+        labelFromServiceType={labelFromServiceType}
       />
     </div>
   );

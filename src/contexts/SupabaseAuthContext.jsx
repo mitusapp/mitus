@@ -1,18 +1,23 @@
 // src/contexts/SupabaseAuthContext.jsx
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
 const AuthContext = createContext(undefined);
 
+// Rutas públicas que NO queremos guardar como "última visitada"
+const PUBLIC_PATHS = new Set([
+  '/', '/login', '/signup', '/signup-confirm', '/reset-password'
+]);
+
 export const AuthProvider = ({ children }) => {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
-  // Arranca en true para no “parpadear” sin sesión restaurada
   const [loading, setLoading] = useState(true);
 
   const handleSessionChange = useCallback((currentSession) => {
@@ -20,6 +25,19 @@ export const AuthProvider = ({ children }) => {
     setUser(currentSession?.user ?? null);
     setLoading(false);
   }, []);
+
+  // 🧠 Guardar última ruta privada visitada (para volver exactamente ahí)
+  useEffect(() => {
+    if (!loading && user) {
+      const isPublic = PUBLIC_PATHS.has(location.pathname);
+      if (!isPublic) {
+        try {
+          const full = `${location.pathname}${location.search || ''}${location.hash || ''}`;
+          sessionStorage.setItem('lastVisitedPath', full);
+        } catch {}
+      }
+    }
+  }, [loading, user, location]);
 
   // Restaurar sesión y escuchar cambios
   useEffect(() => {
@@ -31,22 +49,30 @@ export const AuthProvider = ({ children }) => {
       handleSessionChange(session);
     })();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      handleSessionChange(session);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      handleSessionChange(newSession);
 
-      // ✅ Al iniciar sesión (email/pass u OAuth), redirige al destino original o /profile
-      if (event === 'SIGNED_IN') {
+      // ✅ Si hay una ruta pendiente, úsala también en TOKEN_REFRESHED / USER_UPDATED
+      const eventsThatRestore = ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'];
+      if (newSession && eventsThatRestore.includes(event)) {
         try {
-          const target = sessionStorage.getItem('postLoginRedirect');
-          if (target) {
+          const pending = sessionStorage.getItem('postLoginRedirect');
+          if (pending) {
             sessionStorage.removeItem('postLoginRedirect');
-            navigate(target, { replace: true });
-          } else {
-            navigate('/profile', { replace: true });
+            navigate(pending, { replace: true });
+            return;
           }
-        } catch {
-          navigate('/profile', { replace: true });
-        }
+          const last = sessionStorage.getItem('lastVisitedPath');
+          if (last && !PUBLIC_PATHS.has(new URL(last, window.location.origin).pathname)) {
+            navigate(last, { replace: true });
+            return;
+          }
+        } catch {}
+      }
+
+      // Comportamiento por defecto tras login si NO había redirect/lastRoute
+      if (event === 'SIGNED_IN' && newSession) {
+        navigate('/profile', { replace: true });
       }
     });
 
@@ -56,16 +82,13 @@ export const AuthProvider = ({ children }) => {
     };
   }, [handleSessionChange, navigate]);
 
+  // === Helpers de autenticación ===
   const signUp = useCallback(async (email, password, options) => {
     setLoading(true);
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        ...options,
-        // Tras registrarse, el usuario confirma y vuelve a /login
-        emailRedirectTo: `${window.location.origin}/login`,
-      },
+      options: { ...options, emailRedirectTo: `${window.location.origin}/login` },
     });
 
     if (error) {
@@ -101,12 +124,18 @@ export const AuthProvider = ({ children }) => {
 
     if (data?.session) {
       handleSessionChange(data.session);
+      // 🔁 Prioridad: postLoginRedirect -> lastVisitedPath -> /profile
       let next = '/profile';
       try {
-        const stored = sessionStorage.getItem('postLoginRedirect');
-        if (stored) {
+        const pending = sessionStorage.getItem('postLoginRedirect');
+        if (pending) {
           sessionStorage.removeItem('postLoginRedirect');
-          next = stored;
+          next = pending;
+        } else {
+          const last = sessionStorage.getItem('lastVisitedPath');
+          if (last && !PUBLIC_PATHS.has(new URL(last, window.location.origin).pathname)) {
+            next = last;
+          }
         }
       } catch {}
       navigate(next, { replace: true });
@@ -120,9 +149,7 @@ export const AuthProvider = ({ children }) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        // ✅ Vuelve a una ruta pública; el listener decidirá el destino final
         redirectTo: `${window.location.origin}/login`,
-        // En Google, forzar selector de cuenta ayuda a evitar sesiones pegadas
         queryParams: provider === 'google' ? { prompt: 'select_account' } : undefined,
       },
     });
@@ -136,32 +163,29 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       return { data, error };
     }
-
-    // Supabase redirige; al volver, onAuthStateChange hará la navegación.
+    // Redirigirá el proveedor; al volver, onAuthStateChange hará la navegación
     return { data, error: null };
   }, [toast]);
 
   /**
-   * Cerrar sesión robusto:
-   * - Intenta revocar en servidor (scope: 'global').
-   * - Si la sesión ya no existe (403 session_not_found), lo tratamos como “ya estabas fuera”.
-   * - Siempre limpia estado local y navega al Home.
+   * Cerrar sesión robusto.
+   * Limpia storage y navega al Home.
    */
   const signOut = useCallback(async () => {
     setLoading(true);
     try {
       const { error } = await supabase.auth.signOut({ scope: 'global' });
-      if (error && error.code !== 'session_not_found') {
-        throw error;
-      }
+      if (error && error.code !== 'session_not_found') throw error;
     } catch (e) {
       const msg = String(e?.message || e?.msg || e || '');
-      if (!msg.includes('session_not_found')) {
-        console.error('Error al cerrar sesión:', e);
-      }
+      if (!msg.includes('session_not_found')) console.error('Error al cerrar sesión:', e);
     } finally {
-      // Limpieza local garantizada
       try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
+      // 🧹 Limpia recordatorios de ruta
+      try {
+        sessionStorage.removeItem('postLoginRedirect');
+        sessionStorage.removeItem('lastVisitedPath');
+      } catch {}
       handleSessionChange(null);
       navigate('/', { replace: true });
       setLoading(false);

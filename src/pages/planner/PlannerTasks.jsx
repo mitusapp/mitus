@@ -1,16 +1,50 @@
 // src/pages/planner/PlannerTasks.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Plus, Trash2, Edit, CheckCircle, Circle } from 'lucide-react';
+import { ArrowLeft, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
-// ✅ React Query para invalidar caché de eventos en /profile
+// React Query
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+
+// Componentes
+import TasksList from '@/components/planner/TasksList.jsx';
+import TasksKanban from '@/components/planner/TasksKanban.jsx';
+import TaskFormModal from '@/components/planner/TaskFormModal.jsx';
+import TasksSummary from '@/components/planner/TasksSummary.jsx';
+
+/** Catálogo de categorías (mismas que proveedores) */
+const SERVICE_TYPES = [
+  { value: 'wedding_planner', label: 'Organizador/a de bodas' },
+  { value: 'photography', label: 'Fotografía' },
+  { value: 'video', label: 'Video' },
+  { value: 'photo_video', label: 'Foto y Video' },
+  { value: 'music_dj', label: 'Música / DJ' },
+  { value: 'live_band', label: 'Banda en vivo' },
+  { value: 'mc_animacion', label: 'Maestro de ceremonia / Animación' },
+  { value: 'lighting_sound', label: 'Luces y sonido' },
+  { value: 'florist', label: 'Flores / Floristería' },
+  { value: 'decor_rentals', label: 'Decoración / Alquileres' },
+  { value: 'catering', label: 'Catering / Banquete' },
+  { value: 'cake_desserts', label: 'Torta y Postres' },
+  { value: 'bar_beverages', label: 'Bar y Bebidas' },
+  { value: 'beauty', label: 'Maquillaje y peinado' },
+  { value: 'attire', label: 'Vestuario y accesorios' },
+  { value: 'officiant', label: 'Oficiante' },
+  { value: 'transport', label: 'Transporte' },
+  { value: 'security', label: 'Seguridad' },
+  { value: 'kids_babysitting', label: 'Niñera / Zona infantil' },
+  { value: 'venue', label: 'Lugar / Venue' },
+  { value: 'invitations', label: 'Invitaciones / Papelería' },
+  { value: 'photobooth', label: 'Cabina de fotos' },
+  { value: 'fireworks', label: 'Pirotecnia' },
+  { value: 'av_production', label: 'Producción / A.V.' },
+  { value: 'other', label: 'Otro' },
+];
 
 const PRIORITY_OPTIONS = [
   { value: 'low', label: 'Baja' },
@@ -24,110 +58,19 @@ const VISIBILITY_OPTIONS = [
   { value: 'public', label: 'Público' },
 ];
 
-const TaskForm = ({
-  formData, setFormData, handleSave, closeModal, teamMembers,
-}) => (
-  <form onSubmit={handleSave} className="space-y-4 py-4">
-    <div>
-      <label className="block text-sm font-medium text-gray-200 mb-2">Título de la Tarea</label>
-      <input
-        type="text"
-        placeholder="Título"
-        value={formData.title}
-        onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-        required
-        className="w-full p-3 rounded bg-white/10 border border-white/20"
-      />
-    </div>
+const labelFromServiceType = (value) =>
+  SERVICE_TYPES.find((s) => s.value === value)?.label || null;
 
-    <div>
-      <label className="block text-sm font-medium text-gray-200 mb-2">Descripción</label>
-      <textarea
-        placeholder="Descripción"
-        value={formData.description}
-        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-        className="w-full p-3 rounded bg-white/10 border border-white/20 h-24"
-      />
-    </div>
-
-    {/* Nueva fila: Prioridad / Categoría */}
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-200 mb-2">Prioridad</label>
-        <select
-          value={formData.priority || ''}
-          onChange={(e) => setFormData({ ...formData, priority: e.target.value || null })}
-          className="w-full p-3 rounded bg-white/10 border border-white/20"
-        >
-          <option value="">Sin prioridad</option>
-          {PRIORITY_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-200 mb-2">Categoría</label>
-        <input
-          type="text"
-          placeholder="Ej: Fotografía, Proveedores…"
-          value={formData.category || ''}
-          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-          className="w-full p-3 rounded bg-white/10 border border-white/20"
-        />
-      </div>
-    </div>
-
-    {/* Nueva fila: Responsable / Visibilidad */}
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div>
-        <label className="block text-sm font-medium text-gray-200 mb-2">Responsable</label>
-        <select
-          value={formData.assignee_team_id || ''}
-          onChange={(e) => setFormData({ ...formData, assignee_team_id: e.target.value || null })}
-          className="w-full p-3 rounded bg-white/10 border border-white/20"
-        >
-          <option value="">Sin responsable</option>
-          {teamMembers.map(m => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
-        <p className="text-xs text-gray-400 mt-1">
-          Si no asignas a nadie, en los listados se mostrará tu primer nombre.
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-200 mb-2">Visibilidad</label>
-        <select
-          value={formData.visibility || 'private'}
-          onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
-          className="w-full p-3 rounded bg-white/10 border border-white/20"
-        >
-          {VISIBILITY_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </div>
-    </div>
-
-    <div>
-      <label className="block text-sm font-medium text-gray-200 mb-2">Fecha Límite</label>
-      <input
-        type="date"
-        value={formData.due_date ? formData.due_date.split('T')[0] : ''}
-        onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-        className="w-full p-3 rounded bg-white/10 border border-white/20"
-        style={{ colorScheme: 'dark' }}
-      />
-    </div>
-
-    <DialogFooter>
-      <Button type="button" variant="ghost" onClick={closeModal}>Cancelar</Button>
-      <Button type="submit" className="bg-cyan-600 hover:bg-cyan-700">Guardar Tarea</Button>
-    </DialogFooter>
-  </form>
-);
+// Etiquetas del tipo de evento (como en ProfilePage.jsx)
+const EVENT_TYPE_LABELS = {
+  boda: 'Boda',
+  quince: 'Quince Años',
+  cumpleanos: 'Cumpleaños',
+  corporativo: 'Corporativo',
+  babyshower: 'Baby Shower',
+  aniversario: 'Aniversario',
+  otro: 'Otro Evento',
+};
 
 const PlannerTasks = () => {
   const { eventId } = useParams();
@@ -138,8 +81,10 @@ const PlannerTasks = () => {
 
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState('list'); // list or kanban
+  const [view, setView] = useState('list'); // list | kanban
+
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [currentTask, setCurrentTask] = useState(null);
   const [formData, setFormData] = useState({
     title: '',
@@ -151,6 +96,37 @@ const PlannerTasks = () => {
     visibility: 'private',
   });
   const [teamMembers, setTeamMembers] = useState([]);
+
+  // ---- Encabezado tipo “Boda de Ana y Luis – 25/10/2025”
+  const [eventHeader, setEventHeader] = useState('');
+
+  const formatShortEsDate = (d) => {
+    if (!d) return '';
+    const date = new Date(String(d).replace(/-/g, '/'));
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  const fetchEventInfo = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('id, title, date, event_type, event_type_label, invitation_details')
+        .eq('id', eventId)
+        .single();
+      if (error) throw error;
+
+      const hostsArr = data?.invitation_details?.hosts;
+      const hosts = Array.isArray(hostsArr) && hostsArr.length ? hostsArr.join(' y ') : (data?.title || '');
+      const typeLabel = EVENT_TYPE_LABELS[data?.event_type] || data?.event_type_label || 'Evento';
+      const dateLabel = formatShortEsDate(data?.date);
+
+      const header = `${typeLabel}${hosts ? ` de ${hosts}` : ''}${dateLabel ? ` – ${dateLabel}` : ''}`;
+      setEventHeader(header);
+    } catch {
+      setEventHeader('');
+    }
+  }, [eventId]);
 
   const fetchTeam = useCallback(async () => {
     const { data, error } = await supabase
@@ -173,13 +149,14 @@ const PlannerTasks = () => {
       .eq('event_id', eventId)
       .order('created_at', { ascending: false });
     if (error) {
-      toast({ title: "Error al cargar tareas", description: error.message, variant: "destructive" });
+      toast({ title: 'Error al cargar tareas', description: error.message, variant: 'destructive' });
     } else {
       setTasks(data || []);
     }
     setLoading(false);
   }, [eventId]);
 
+  useEffect(() => { fetchEventInfo(); }, [fetchEventInfo]);
   useEffect(() => { fetchTeam(); }, [fetchTeam]);
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
@@ -211,6 +188,8 @@ const PlannerTasks = () => {
 
   const handleSaveTask = async (e) => {
     e.preventDefault();
+    setSaving(true);
+
     const payload = {
       event_id: eventId,
       title: formData.title,
@@ -224,35 +203,30 @@ const PlannerTasks = () => {
 
     let error;
     if (currentTask) {
-      ({ error } = await supabase
-        .from('planner_tasks')
-        .update(payload)
-        .eq('id', currentTask.id));
+      ({ error } = await supabase.from('planner_tasks').update(payload).eq('id', currentTask.id));
     } else {
-      ({ error } = await supabase
-        .from('planner_tasks')
-        .insert(payload));
+      ({ error } = await supabase.from('planner_tasks').insert(payload));
     }
 
     if (error) {
-      toast({ title: "Error al guardar tarea", description: error.message, variant: "destructive" });
+      toast({ title: 'Error al guardar tarea', description: error.message, variant: 'destructive' });
     } else {
       toast({ title: `Tarea ${currentTask ? 'actualizada' : 'creada'}` });
       setIsModalOpen(false);
       fetchTasks();
-      // ❌ No invalidamos eventos aquí: solo al completar/eliminar tareas (según requerimiento).
     }
+
+    setSaving(false);
   };
 
   const handleDeleteTask = async (taskId) => {
-    if (!window.confirm("¿Seguro que quieres eliminar esta tarea?")) return;
+    if (!window.confirm('¿Seguro que quieres eliminar esta tarea?')) return;
     const { error } = await supabase.from('planner_tasks').delete().eq('id', taskId);
     if (error) {
-      toast({ title: "Error al eliminar tarea", variant: "destructive" });
+      toast({ title: 'Error al eliminar tarea', variant: 'destructive' });
     } else {
-      toast({ title: "Tarea eliminada" });
+      toast({ title: 'Tarea eliminada' });
       fetchTasks();
-      // ✅ También refrescar la lista de eventos porque cambia el % de avance
       if (user?.id) {
         queryClient.invalidateQueries({ queryKey: ['events', user.id] });
       }
@@ -262,27 +236,64 @@ const PlannerTasks = () => {
   const updateTaskStatus = async (taskId, status) => {
     const { error } = await supabase.from('planner_tasks').update({ status }).eq('id', taskId);
     if (error) {
-      toast({ title: "Error al actualizar estado", variant: "destructive" });
+      toast({ title: 'Error al actualizar estado', variant: 'destructive' });
     } else {
       fetchTasks();
-      // ✅ Solo si la tarea queda COMPLETADA, invalidamos la lista de eventos en /profile
       if (status === 'completed' && user?.id) {
         queryClient.invalidateQueries({ queryKey: ['events', user.id] });
       }
     }
   };
 
-  const columns = {
-    pending: tasks.filter(t => t.status === 'pending'),
-    in_progress: tasks.filter(t => t.status === 'in_progress'),
-    completed: tasks.filter(t => t.status === 'completed'),
-  };
+  // --- Buscador --------------------------------------------------------------
+  const [query, setQuery] = useState('');
+
+  const norm = (s) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+  const teamMap = useMemo(() => {
+    const map = {};
+    (teamMembers || []).forEach((m) => { map[m.id] = m.name; });
+    return map;
+  }, [teamMembers]);
+
+  const filteredTasks = useMemo(() => {
+    const q = norm(query.trim());
+    if (!q) return tasks;
+
+    const statusLabel = { pending: 'Pendiente', in_progress: 'En progreso', completed: 'Completada' };
+    const visLabel = { private: 'Privado', team: 'Equipo', public: 'Público' };
+
+    return tasks.filter((t) => {
+      const catLabel = labelFromServiceType(t.category) || '';
+      const assignee = t.assignee_team_id ? (teamMap[t.assignee_team_id] || '') : '';
+      const hay = norm(
+        `${t.title} ${t.description || ''} ${t.category || ''} ${catLabel} ${t.priority || ''} ${assignee} ${t.visibility || ''} ${visLabel[t.visibility] || ''} ${t.status || ''} ${statusLabel[t.status] || ''} ${t.due_date || ''}`
+      );
+      return hay.includes(q);
+    });
+  }, [tasks, query, teamMap]);
+
+  // --- Items para el resumen (solo tareas) -----------------------------------
+  const summaryItems = useMemo(() => {
+    return (tasks || []).map((t) => ({
+      due: t.due_date || null,
+      prioridad: t.priority || 'low',
+      status: t.status || 'pending',
+      owner: t.assignee_team_id ? (teamMap[t.assignee_team_id] || 'Sin responsable') : 'Sin responsable',
+    }));
+  }, [tasks, teamMap]);
+
+  // --------------------------------------------------------------------------
 
   return (
     <div className="min-h-screen py-8 px-4">
       <div className="max-w-6xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
               <Button
                 variant="ghost"
@@ -293,6 +304,11 @@ const PlannerTasks = () => {
               </Button>
               <div>
                 <h1 className="text-2xl font-bold text-white">Tareas y Checklist</h1>
+                {eventHeader && (
+                  <p className="text-xs sm:text-sm text-gray-300 mt-0.5 break-words">
+                    {eventHeader}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-4">
@@ -319,135 +335,59 @@ const PlannerTasks = () => {
             </div>
           </div>
 
+          {/* 🔎 Resumen SOLO tareas (inspirado en TasksPaymentsSummary) */}
+          <TasksSummary items={summaryItems} initialRange="week" />
+
+          {/* 🔎 Buscador */}
+          <div className="relative mb-6 mt-2">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400 text-white"
+              placeholder="Buscar por título, categoría (label), responsable, descripción…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
           {loading ? (
             <div className="text-center text-white">Cargando tareas...</div>
           ) : view === 'list' ? (
-            <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 space-y-3">
-              {tasks.map(task => (
-                <div key={task.id} className="flex items-center justify-between bg-white/5 p-4 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => updateTaskStatus(task.id, task.status === 'completed' ? 'pending' : 'completed')}
-                    >
-                      {task.status === 'completed'
-                        ? <CheckCircle className="text-green-400" />
-                        : <Circle className="text-gray-400" />
-                      }
-                    </button>
-                    <div>
-                      <p className={`font-semibold text-white ${task.status === 'completed' && 'line-through text-gray-400'}`}>
-                        {task.title}
-                        {task.priority && (
-                          <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 border border-white/20">
-                            {task.priority}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        {task.category ? `${task.category} • ` : ''}
-                        {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Sin fecha'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={() => handleOpenModal(task)}
-                      size="icon"
-                      variant="ghost"
-                      className="text-blue-400 hover:bg-blue-500/20"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      onClick={() => handleDeleteTask(task.id)}
-                      size="icon"
-                      variant="ghost"
-                      className="text-red-400 hover:bg-red-500/20"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {tasks.length === 0 && (
-                <p className="text-center text-gray-400 py-8">No hay tareas creadas.</p>
-              )}
-            </div>
+            <TasksList
+              tasks={filteredTasks}
+              onToggleStatus={updateTaskStatus}
+              onEdit={handleOpenModal}
+              onDelete={handleDeleteTask}
+              labelFromServiceType={labelFromServiceType}
+              teamMembers={teamMembers}
+            />
           ) : (
-            <div className="grid md:grid-cols-3 gap-6">
-              {Object.entries(columns).map(([status, tasksInColumn]) => (
-                <div key={status} className="bg-white/10 rounded-2xl p-4 border border-white/20">
-                  <h3 className="font-bold text-white mb-4 capitalize">
-                    {status.replace('_', ' ')} ({tasksInColumn.length})
-                  </h3>
-                  <div className="space-y-3">
-                    {tasksInColumn.map(task => (
-                      <div key={task.id} className="bg-white/5 p-3 rounded-lg">
-                        <p className="font-semibold text-white mb-1">
-                          {task.title}
-                          {task.priority && (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 border border-white/20">
-                              {task.priority}
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {task.category ? `${task.category} • ` : ''}
-                          {task.due_date ? new Date(task.due_date).toLocaleDateString() : 'Sin fecha'}
-                        </p>
-                        <div className="flex gap-2 mt-2">
-                          <select
-                            value={task.status}
-                            onChange={(e) => updateTaskStatus(task.id, e.target.value)}
-                            className="text-xs p-1 rounded bg-white/10 border-white/20"
-                          >
-                            <option value="pending">Pendiente</option>
-                            <option value="in_progress">En Progreso</option>
-                            <option value="completed">Completada</option>
-                          </select>
-                          <Button
-                            onClick={() => handleOpenModal(task)}
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-blue-400"
-                          >
-                            <Edit className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            onClick={() => handleDeleteTask(task.id)}
-                            size="icon"
-                            variant="ghost"
-                            className="h-6 w-6 text-red-400"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <TasksKanban
+              tasks={filteredTasks}
+              onUpdateStatus={updateTaskStatus}
+              onEdit={handleOpenModal}
+              onDelete={handleDeleteTask}
+              labelFromServiceType={labelFromServiceType}
+              teamMembers={teamMembers}
+            />
           )}
         </motion.div>
       </div>
 
-      <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="bg-slate-800/90 backdrop-blur-sm border-cyan-500 text-white">
-          <DialogHeader>
-            <DialogTitle className="text-2xl">
-              {currentTask ? 'Editar Tarea' : 'Crear Tarea'}
-            </DialogTitle>
-          </DialogHeader>
-          <TaskForm
-            formData={formData}
-            setFormData={setFormData}
-            handleSave={handleSaveTask}
-            closeModal={() => setIsModalOpen(false)}
-            teamMembers={teamMembers}
-          />
-        </DialogContent>
-      </Dialog>
+      {/* Modal reutilizable */}
+      <TaskFormModal
+        open={isModalOpen}
+        onOpenChange={setIsModalOpen}
+        title={currentTask ? 'Editar Tarea' : 'Crear Tarea'}
+        formData={formData}
+        setFormData={setFormData}
+        onSubmit={handleSaveTask}
+        saving={saving}
+        teamMembers={teamMembers}
+        serviceTypes={SERVICE_TYPES}
+        priorityOptions={PRIORITY_OPTIONS}
+        visibilityOptions={VISIBILITY_OPTIONS}
+        labelFromServiceType={labelFromServiceType}
+      />
     </div>
   );
 };
