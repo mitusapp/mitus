@@ -297,7 +297,7 @@ const PlannerTasks = () => {
             <div className="flex items-center">
               <Button
                 variant="ghost"
-                onClick={() => navigate(`/host/${eventId}`)}
+                onClick={() => navigate(-1)}
                 className="text-white hover:bg-white/10 mr-4"
               >
                 <ArrowLeft />

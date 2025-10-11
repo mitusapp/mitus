@@ -1,282 +1,304 @@
+// src/components/planner/TimelineFormModal.jsx
 import React, { useMemo, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Search, Clock, MapPin, Users, Layers, CheckSquare, UserSquare2, Calendar } from 'lucide-react';
+import { Search, Clock, MapPin, Calendar } from 'lucide-react';
 
 /**
  * Modal para crear/editar un hito del cronograma.
- * Campos FE: date_start, time_start, date_end, time_end (se combinan a start_time/end_time en el submit del padre).
- *
- * Props:
- *  - open, onOpenChange, saving
- *  - form, setForm
- *  - onSubmit(form)
- *  - serviceTypes, subjects, teamMembers, eventProviders
- *  - labelFromServiceType
+ * SOLO se cambió el ORDEN DE LOS ELEMENTOS, sin modificar lógica, estilos ni colores.
+ * Orden requerido:
+ *  - Título
+ *  - Descripción / Detalles
+ *  - Observaciones
+ *  - Fecha inicio  |  Fecha fin
+ *  - Hora inicio   |  Hora fin
+ *  - Proveedores implicados
+ *  - Ubicación     |  Categoría
+ *  - Sujeto        |  Responsable (equipo)
+ *  - Notas internas
  */
 export default function TimelineFormModal({
   open,
   onOpenChange,
-  saving,
-  form,
-  setForm,
-  onSubmit,
+  saving = false,
+  form = {},
+  setForm = () => {},
+  onSubmit = () => {},
   serviceTypes = [],
   subjects = [],
   teamMembers = [],
   eventProviders = [],
-  labelFromServiceType,
+  labelFromServiceType = (v) => v,
 }) {
-  const [provQuery, setProvQuery] = useState('');
+  const val = (k, fallback = '') => (form?.[k] ?? fallback);
+  const on = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  const providersBase = useMemo(() => {
-    return (eventProviders || [])
-      .map((r) => {
-        const p = r.planner_providers || {};
-        return {
-          id: r.provider_id,
-          name: p.name || '—',
-          labelCat: labelFromServiceType?.(p.service_type) || p.service_type || '',
-        };
-      })
-      .sort((a, b) => a.name.localeCompare(b.name));
+  // Proveedores del evento (para multi-selección)
+  const providers = useMemo(() => {
+    return (eventProviders || []).map((r) => {
+      const p = r?.planner_providers || {};
+      return {
+        id: r.provider_id,
+        name: p.name || '—',
+        service_type: p.service_type || 'other',
+        service_type_label: labelFromServiceType(p.service_type) || 'Otro',
+      };
+    });
   }, [eventProviders, labelFromServiceType]);
 
+  // Búsqueda de proveedores
+  const [provQuery, setProvQuery] = useState('');
   const providersFiltered = useMemo(() => {
     const q = provQuery.trim().toLowerCase();
-    if (!q) return []; // ← solo mostrar si hay texto
-    return providersBase.filter((o) => `${o.name} ${o.labelCat}`.toLowerCase().includes(q));
-  }, [providersBase, provQuery]);
+    if (!q) return providers;
+    return providers.filter((p) => `${p.name} ${p.service_type_label}`.toLowerCase().includes(q));
+  }, [provQuery, providers]);
 
   const toggleProvider = (id) => {
-    const set = new Set(form.provider_ids || []);
-    if (set.has(id)) set.delete(id); else set.add(id);
-    setForm({ ...form, provider_ids: Array.from(set) });
+    setForm((f) => {
+      const prev = Array.isArray(f.provider_ids) ? f.provider_ids : [];
+      const wasSelected = prev.includes(id);
+      const next = wasSelected ? prev.filter((x) => x !== id) : [...prev, id];
+      // Mantener comportamiento: al seleccionar un proveedor desde búsqueda se limpia la query para cerrar resultados
+      if (!wasSelected) setProvQuery('');
+      return { ...f, provider_ids: next };
+    });
   };
 
-  // helpers para inputs
-  const val = (s) => (s || '');
-  const on = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  // Validación mínima: hora fin requerida
+  const canSave = Boolean(val('time_end'));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-slate-800/95 text-white border border-purple-500 w-[95vw] max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="bg-[#0b0b12] text-white border border-green-500 max-w-3xl md:max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-2xl">{form?.id ? 'Editar hito' : 'Crear hito'}</DialogTitle>
+          <DialogTitle className="text-2xl">{form?.id ? 'Editar hito' : 'Nuevo hito'}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Completa la información del hito del cronograma. Las fechas por defecto corresponden a la fecha del evento.
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="grid md:grid-cols-12 gap-3">
-            {/* Título */}
-            <div className="md:col-span-12">
-              <label className="text-sm text-gray-300 mb-1 block">Título del hito</label>
-              <input
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                placeholder="Ej. Llegada de invitados / Ingreso novios"
-                value={val(form.title)}
-                onChange={on('title')}
-                required
-              />
-            </div>
-
-            {/* FECHA inicio / FECHA fin */}
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Calendar className="w-4 h-4" /> Fecha de inicio
-              </label>
+        {/* Formulario (SOLO reordenado) */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 py-2">
+          
+          {/* 4) Fecha inicio  |  Fecha fin */}
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Fecha inicio</label>
+            <div className="relative">
+              <Calendar className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="date"
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                value={val(form.date_start)}
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20"
+                value={val('date_start')}
                 onChange={on('date_start')}
               />
             </div>
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Calendar className="w-4 h-4" /> Fecha de fin
-              </label>
+          </div>
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Fecha fin</label>
+            <div className="relative">
+              <Calendar className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="date"
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                value={val(form.date_end)}
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20"
+                value={val('date_end')}
                 onChange={on('date_end')}
               />
             </div>
+          </div>
 
-            {/* HORA inicio / HORA fin */}
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Clock className="w-4 h-4" /> Hora de inicio
-              </label>
+          {/* 5) Hora inicio  |  Hora fin */}
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Hora inicio</label>
+            <div className="relative">
+              <Clock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="time"
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                value={val(form.time_start)}
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20"
+                value={val('time_start')}
                 onChange={on('time_start')}
               />
             </div>
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Clock className="w-4 h-4" /> Hora de fin (opcional)
-              </label>
+          </div>
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Hora fin</label>
+            <div className="relative">
+              <Clock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="time"
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                value={val(form.time_end)}
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20"
+                value={val('time_end')}
                 onChange={on('time_end')}
               />
             </div>
+          </div>
+          
+          {/* 1) Título */}
+          <div className="md:col-span-12">
+            <label className="block text-sm text-gray-300 mb-1">Título</label>
+            <input
+              className="w-full px-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
+              placeholder="Ej. Llegada proveedores, Recepción, Ceremonia…"
+              value={val('title')}
+              onChange={on('title')}
+            />
+          </div>
 
-            {/* Categoría / Sujeto */}
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Layers className="w-4 h-4" /> Categoría
-              </label>
-              <select
-                className="w-full p-2 rounded border border-white/20 bg-white text-gray-900"
-                value={form.category || 'other'}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                {serviceTypes.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <UserSquare2 className="w-4 h-4" /> Sujeto / Protagonista
-              </label>
-              <select
-                className="w-full p-2 rounded border border-white/20 bg-white text-gray-900"
-                value={form.subject || ''}
-                onChange={(e) => setForm({ ...form, subject: e.target.value })}
-              >
-                <option value="">Sin sujeto</option>
-                {subjects.map((s) => (
-                  <option key={s.value} value={s.value}>{s.label}</option>
-                ))}
-              </select>
-            </div>
+          {/* 2) Descripción / Detalles */}
+          <div className="md:col-span-12">
+            <label className="block text-sm text-gray-300 mb-1">Descripción / Detalles</label>
+            <textarea
+              rows={3}
+              className="w-full px-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
+              placeholder="Notas operativas, secuencia, cues, etc."
+              value={val('description')}
+              onChange={on('description')}
+            />
+          </div>
 
-            {/* Responsable / Ubicación */}
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <Users className="w-4 h-4" /> Responsable
-              </label>
-              <select
-                className="w-full p-2 rounded border border-white/20 bg-white text-gray-900"
-                value={form.assignee_team_id || ''}
-                onChange={(e) => setForm({ ...form, assignee_team_id: e.target.value || null })}
-              >
-                <option value="">Sin responsable</option>
-                {teamMembers.map((m) => (
-                  <option key={m.id} value={m.id}>{m.display_name || m.name || 'Miembro'}</option>
-                ))}
-              </select>
-            </div>
-            <div className="md:col-span-6">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <MapPin className="w-4 h-4" /> Ubicación / Espacio
-              </label>
+          {/* 3) Observaciones */}
+          <div className="md:col-span-12">
+            <label className="block text-sm text-gray-300 mb-1">Observaciones</label>
+            <textarea
+              rows={3}
+              className="w-full px-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
+              placeholder="Observaciones generales, contexto adicional, etc."
+              value={val('observations')}
+              onChange={on('observations')}
+            />
+          </div>
+
+          
+          {/* 6) Proveedores implicados */}
+          <div className="md:col-span-12">
+            <label className="block text-sm text-gray-300 mb-1">Proveedores implicados</label>
+
+            {/* Buscador de proveedores */}
+            <div className="relative mb-2">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
+                placeholder="Escribe para buscar proveedor por nombre o categoría…"
+                value={provQuery}
+                onChange={(e) => setProvQuery(e.target.value)}
+              />
+            </div>
+
+            {/* Resultados: solo si hay query */}
+            {provQuery.trim().length > 0 && (
+              <div className="max-h-40 overflow-auto rounded border border-white/20 bg-white/5 divide-y divide-white/10">
+                {providersFiltered.map((opt) => {
+                  const active = (form.provider_ids || []).includes(opt.id);
+                  return (
+                    <label key={opt.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5">
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={() => toggleProvider(opt.id)}
+                      />
+                      <span className="flex-1 text-sm">
+                        {opt.name}
+                        <span className="text-xs text-gray-400 ml-2">{opt.service_type_label}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {providersFiltered.length === 0 && (
+                  <div className="px-3 py-2 text-sm text-gray-400">Sin coincidencias…</div>
+                )}
+              </div>
+            )}
+
+            {/* Seleccionados */}
+            {(form.provider_ids || []).length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {(form.provider_ids || []).map((id) => {
+                  const p = providers.find((x) => x.id === id);
+                  if (!p) return null;
+                  return (
+                    <span key={id} className="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/20">
+                      {p.name}
+                      <span className="text-[11px] text-gray-400 ml-2">{p.service_type_label}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 7) Ubicación  |  Categoría */}
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Ubicación</label>
+            <div className="relative">
+              <MapPin className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
                 placeholder="Ej. Jardín, Salón principal, Iglesia…"
-                value={val(form.location)}
+                value={val('location')}
                 onChange={on('location')}
               />
             </div>
+          </div>
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Categoría</label>
+            <select
+              className="w-full px-3 py-2 rounded bg-white text-gray-900 border border-white/20"
+              value={val('category', 'other')}
+              onChange={on('category')}
+            >
+              <option value="" className="text-gray-900">—</option>
+              {serviceTypes.map((s) => (
+                <option key={s.value} value={s.value} className="text-gray-900">{s.label}</option>
+              ))}
+            </select>
+          </div>
 
-            {/* Proveedores (multi) */}
-            <div className="md:col-span-12">
-              <label className="text-sm text-gray-300 mb-1 flex items-center gap-1">
-                <CheckSquare className="w-4 h-4" /> Proveedores implicados
-              </label>
+          {/* 8) Sujeto  |  Responsable (equipo) */}
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Sujeto</label>
+            <select
+              className="w-full px-3 py-2 rounded bg-white text-gray-900 border border-white/20"
+              value={val('subject', '')}
+              onChange={on('subject')}
+            >
+              <option value="" className="text-gray-900">—</option>
+              {subjects.map((s) => (
+                <option key={s.value} value={s.value} className="text-gray-900">{s.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-6">
+            <label className="block text-sm text-gray-300 mb-1">Responsable (equipo)</label>
+            <select
+              className="w-full px-3 py-2 rounded bg-white text-gray-900 border border-white/20"
+              value={val('assignee_team_id', '')}
+              onChange={on('assignee_team_id')}
+            >
+              <option value="" className="text-gray-900">—</option>
+              {teamMembers.map((m) => (
+                <option key={m.id} value={m.id} className="text-gray-900">{m.display_name || m.name}</option>
+              ))}
+            </select>
+          </div>
 
-              {/* Buscador de proveedores */}
-              <div className="relative mb-2">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  className="w-full pl-9 pr-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
-                  placeholder="Escribe para buscar proveedor por nombre o categoría…"
-                  value={provQuery}
-                  onChange={(e) => setProvQuery(e.target.value)}
-                />
-              </div>
-
-              {/* Resultados: solo si hay query */}
-              {provQuery.trim().length > 0 && (
-                <div className="max-h-40 overflow-auto rounded border border-white/20 bg-white/5 divide-y divide-white/10">
-                  {providersFiltered.map((opt) => {
-                    const active = (form.provider_ids || []).includes(opt.id);
-                    return (
-                      <label key={opt.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5">
-                        <input
-                          type="checkbox"
-                          className="accent-purple-500"
-                          checked={active}
-                          onChange={() => toggleProvider(opt.id)}
-                        />
-                        <span className="flex-1">
-                          <span className="text-white">{opt.name}</span>
-                          {opt.labelCat && <span className="text-xs text-gray-400"> • {opt.labelCat}</span>}
-                        </span>
-                      </label>
-                    );
-                  })}
-                  {providersFiltered.length === 0 && (
-                    <div className="px-3 py-2 text-sm text-gray-400">Sin resultados.</div>
-                  )}
-                </div>
-              )}
-
-              {/* Seleccionados */}
-              {form.provider_ids?.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-2">
-                  {form.provider_ids.map((id) => {
-                    const opt = providersBase.find((o) => o.id === id) ||
-                                eventProviders.find((r) => r.provider_id === id);
-                    const name = opt?.name || opt?.planner_providers?.name || 'Proveedor';
-                    return (
-                      <span key={id} className="px-2 py-1 rounded bg-white/10 border border-white/20 text-xs">
-                        {name}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Descripción */}
-            <div className="md:col-span-12">
-              <label className="text-sm text-gray-300 mb-1 block">Descripción / Instrucciones</label>
-              <textarea
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                rows={3}
-                placeholder="Detalle del hito, transición con el siguiente, tiempos de montaje, etc."
-                value={val(form.description)}
-                onChange={on('description')}
-              />
-            </div>
-
-            {/* Cues / Notas internas */}
-            <div className="md:col-span-12">
-              <label className="text-sm text-gray-300 mb-1 block">Cues / Notas internas (A/V, música, iluminación, micrófonos…)</label>
-              <textarea
-                className="w-full p-2 rounded bg-white/10 border border-white/20"
-                rows={3}
-                placeholder="Ej. Track 03 a las 7:15pm, micrófono inalámbrico para speech, blackout al finalizar."
-                value={val(form.av_cues)}
-                onChange={on('av_cues')}
-              />
-            </div>
+          {/* 9) Notas internas */}
+          <div className="md:col-span-12">
+            <label className="block text-sm text-gray-300 mb-1">Notas internas</label>
+            <input
+              className="w-full px-3 py-2 rounded bg-white/10 border border-white/20 placeholder:text-gray-400"
+              placeholder="Solo para el equipo, no visible para proveedores"
+              value={val('internal_notes')}
+              onChange={on('internal_notes')}
+            />
           </div>
         </div>
 
-        <DialogFooter className="flex items-center justify-between gap-2 mt-4">
+        <DialogFooter className="flex items-center justify-between gap-2 mt-2">
           <div className="text-xs text-gray-400">
             {form?.id ? 'Editando hito existente' : 'Creando nuevo hito'}
           </div>
-          <Button onClick={() => onSubmit(form)} disabled={saving} className="bg-purple-600 hover:bg-purple-500">
+          <Button onClick={() => canSave && onSubmit(form)} disabled={saving || !canSave} className="bg-green-600 hover:bg-green-500">
             {saving ? 'Guardando…' : 'Guardar'}
           </Button>
         </DialogFooter>

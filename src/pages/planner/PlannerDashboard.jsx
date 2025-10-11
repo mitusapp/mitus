@@ -1,157 +1,330 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/pages/PlannerDashboard.jsx (paso 4 – módulos informativos con alertas)
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ClipboardCheck, Clock, Truck, DollarSign, ListChecks, CalendarClock, Banknote, FileText, Map, Utensils, Gift, Users, Image } from 'lucide-react';
+import {
+  ClipboardList, CalendarClock, Wallet, ArrowLeft, Users, FileText, Building2,
+  ChefHat, Gift, Briefcase, Image, AlertTriangle
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import { supabase } from '@/lib/customSupabaseClient';
+
+// Nota: Mantiene todas las funciones. Solo mejora el hub visual y agrega
+// métricas/alertas dentro de cada botón de módulo. Buscador y botones rápidos: eliminados.
+
+const tzOffset = '-05:00';
+const startOfTodayISO = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  return `${y}-${m}-${day}T00:00:00${tzOffset}`;
+};
+const endOfTodayISO = () => {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  return `${y}-${m}-${day}T23:59:59${tzOffset}`;
+};
 
 const PlannerDashboard = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({
-    upcomingTasks: [],
-    nextTimelineItem: null,
+    // Top-level resumen (se mantiene)
+    nextItem: null,
+    pendingTasks: 0,
     budget: { estimated: 0, actual: 0 },
   });
 
-  const fetchSummary = useCallback(async () => {
-    setLoading(true);
+  const [stats, setStats] = useState({
+    tasks: { pending: 0, completed: 0, overdue: 0 },
+    timeline: { today: 0, upcoming7: 0, nextItem: null },
+    budget: { estimated: 0, actual: 0, overdueAmount: 0 },
+    providers: { count: 0 },
+    team: { count: 0 },
+    venues: { count: 0 },
+    documents: { count: 0 },
+    catering: { count: 0 },
+    gifts: { count: 0 },
+    inspiration: { count: 0 },
+  });
+
+  const fetchSummaryAndStats = useCallback(async () => {
     try {
-      const { data: tasks, error: tasksError } = await supabase
+      const nowIso = new Date().toISOString();
+      const sToday = startOfTodayISO();
+      const eToday = endOfTodayISO();
+
+      // 1) Tareas
+      const { data: tasksData, error: tasksErr } = await supabase
         .from('planner_tasks')
-        .select('id, title, due_date')
-        .eq('event_id', eventId)
-        .eq('status', 'pending')
-        .order('due_date', { ascending: true })
-        .limit(3);
-      if (tasksError) throw tasksError;
-
-      const { data: timeline, error: timelineError } = await supabase
-        .from('planner_timeline_items')
-        .select('id, title, start_time')
-        .eq('event_id', eventId)
-        .gt('start_time', new Date().toISOString())
-        .order('start_time', { ascending: true })
-        .limit(1);
-      if (timelineError) throw timelineError;
-
-      const { data: budgetItems, error: budgetError } = await supabase
-        .from('planner_budget_items')
-        .select('estimated_cost, actual_cost')
+        .select('id, status, due_date')
         .eq('event_id', eventId);
-      if (budgetError) throw budgetError;
+      if (tasksErr) throw tasksErr;
+      const pending = (tasksData || []).filter(t => t.status !== 'completed').length;
+      const completed = (tasksData || []).filter(t => t.status === 'completed').length;
+      const overdue = (tasksData || []).filter(t => t.due_date && new Date(t.due_date) < new Date(sToday) && t.status !== 'completed').length;
 
-      const budget = budgetItems.reduce(
-        (acc, item) => ({
-          estimated: acc.estimated + Number(item.estimated_cost || 0),
-          actual: acc.actual + Number(item.actual_cost || 0),
-        }),
-        { estimated: 0, actual: 0 }
-      );
+      // 2) Cronograma
+      const { data: tlNext } = await supabase
+        .from('planner_timeline_items')
+        .select('id, title, start_ts, start_date')
+        .eq('event_id', eventId)
+        .gt('start_ts', nowIso)
+        .order('start_ts', { ascending: true })
+        .limit(1);
+      const nextItem = (tlNext && tlNext[0]) || null;
 
-      setSummary({
-        upcomingTasks: tasks,
-        nextTimelineItem: timeline && timeline.length > 0 ? timeline[0] : null,
-        budget,
-      });
-    } catch (error) {
-      if (error.code !== 'PGRST116') { // Ignore "0 rows" error for timeline explicitly
-        toast({ title: "Error al cargar el resumen", description: error.message, variant: "destructive" });
+      const { data: tlAll } = await supabase
+        .from('planner_timeline_items')
+        .select('id, start_ts, start_date')
+        .eq('event_id', eventId);
+      const toTS = (it) => it.start_ts ? new Date(it.start_ts) : (it.start_date ? new Date(`${it.start_date}T00:00:00${tzOffset}`) : null);
+      const todayCount = (tlAll || []).filter(it => { const d = toTS(it); if (!d) return false; return d >= new Date(sToday) && d <= new Date(eToday); }).length;
+      const in7 = new Date(); in7.setDate(in7.getDate()+7);
+      const upcoming7 = (tlAll || []).filter(it => { const d = toTS(it); if (!d) return false; return d > new Date() && d <= in7; }).length;
+
+      // 3) Presupuesto y pagos (monto vencido)
+      const { data: budgetData, error: budgetErr } = await supabase
+        .from('planner_budget_items')
+        .select('id, estimated_cost, actual_cost')
+        .eq('event_id', eventId);
+      if (budgetErr) throw budgetErr;
+      const estimated = (budgetData || []).reduce((s, r) => s + Number(r.estimated_cost || 0), 0);
+      const actual = (budgetData || []).reduce((s, r) => s + Number(r.actual_cost || 0), 0);
+      const ids = (budgetData || []).map(b => b.id);
+      let overdueAmount = 0;
+      if (ids.length > 0) {
+        const [{ data: pays }, { data: sched } ] = await Promise.all([
+          supabase.from('planner_payments').select('budget_item_id, amount, payment_date').in('budget_item_id', ids),
+          supabase.from('planner_payment_schedules').select('budget_item_id, amount, due_date').in('budget_item_id', ids),
+        ]);
+        const paidToDate = (pays || []).filter(p => p.payment_date && new Date(p.payment_date) <= new Date()).reduce((sum,p)=> sum + Number(p.amount || 0), 0);
+        const scheduledDue = (sched || []).filter(s => s.due_date && new Date(s.due_date) < new Date(sToday)).reduce((sum,s)=> sum + Number(s.amount || 0), 0);
+        overdueAmount = Math.max(0, scheduledDue - paidToDate);
       }
-    } finally {
-      setLoading(false);
+
+      // 4) Conteos simples de otros módulos
+      async function safeCount(table, filter) {
+        try {
+          const q = supabase.from(table).select('*', { head: true, count: 'exact' });
+          if (filter) filter(q);
+          const res = await (filter ? filter(supabase.from(table).select('*', { head: true, count: 'exact' })) : q);
+          return res.count || 0;
+        } catch { return 0; }
+      }
+
+      const [providersCount, teamCount, venuesCount, docsCount, cateringCount, giftsCount, inspCount] = await Promise.all([
+        safeCount('event_providers', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_team', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_venues', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_documents', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_catering_items', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_gifts', (q) => q.eq('event_id', eventId)),
+        safeCount('planner_inspiration', (q) => q.eq('event_id', eventId)),
+      ]);
+
+      // Top summary (ligero)
+      setSummary({ nextItem, pendingTasks: pending, budget: { estimated, actual } });
+
+      setStats({
+        tasks: { pending, completed, overdue },
+        timeline: { today: todayCount, upcoming7: upcoming7, nextItem },
+        budget: { estimated, actual, overdueAmount },
+        providers: { count: providersCount },
+        team: { count: teamCount },
+        venues: { count: venuesCount },
+        documents: { count: docsCount },
+        catering: { count: cateringCount },
+        gifts: { count: giftsCount },
+        inspiration: { count: inspCount },
+      });
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'No se pudo cargar el resumen del Planner', variant: 'destructive' });
     }
   }, [eventId]);
 
-  useEffect(() => {
-    fetchSummary();
-  }, [fetchSummary]);
+  useEffect(() => { (async () => { setLoading(true); await fetchSummaryAndStats(); setLoading(false); })(); }, [fetchSummaryAndStats]);
 
-  const modules = [
-    { name: 'Tareas y Checklist', path: 'tasks', icon: <ClipboardCheck />, color: 'cyan' },
-    { name: 'Cronograma', path: 'timeline', icon: <Clock />, color: 'purple' },
-    { name: 'Proveedores', path: 'providers', icon: <Truck />, color: 'blue' },
-    { name: 'Presupuesto', path: 'budget', icon: <DollarSign />, color: 'green' },
-    { name: 'Documentos', path: 'documents', icon: <FileText />, color: 'orange' },
-    { name: 'Opciones de Lugar', path: 'venues', icon: <Map />, color: 'red' },
-    { name: 'Comida y Bebidas', path: 'catering', icon: <Utensils />, color: 'yellow' },
-    { name: 'Regalos', path: 'gifts', icon: <Gift />, color: 'pink' },
-    { name: 'Equipo y Roles', path: 'team', icon: <Users />, color: 'indigo' },
-    { name: 'Inspiración', path: 'inspiration', icon: <Image />, color: 'teal' },
-  ];
+  // ---------------------- UI helpers (cards diferenciadas) -------------------
+  const InfoStatCard = ({ label, value, sub }) => (
+    <div className="rounded-xl border border-white/15 bg-white/5 p-4">
+      <div className="text-xs text-gray-200/90">{label}</div>
+      <div className="text-sm font-semibold text-white truncate">{value}</div>
+      {sub ? <div className="text-xs text-gray-300">{sub}</div> : null}
+    </div>
+  );
+
+  const ModuleCard = ({ icon, title, desc, path, lines = [], alert = null }) => (
+    <button onClick={() => navigate(path)} className="group w-full text-left p-4 rounded-xl border border-white/25 bg-white/10 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 transition">
+      <div className="flex items-start gap-3">
+        <div className="pt-0.5">{icon}</div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-white">{title}</h3>
+          <p className="text-sm text-gray-200/90 mb-2">{desc}</p>
+          {lines.length > 0 && (
+            <ul className="text-xs text-gray-200/90 space-y-1">
+              {lines.map((l, idx) => (
+                <li key={idx} className="flex items-center gap-2">
+                  {l.icon ? <span className="opacity-80">{l.icon}</span> : null}
+                  <span>{l.text}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {alert && alert.show ? (
+          <div className={`ml-2 shrink-0 rounded-full px-2 py-1 text-xs font-semibold ${alert.severity === 'danger' ? 'bg-red-500/20 text-red-200 border border-red-500/40' : 'bg-yellow-500/20 text-yellow-100 border border-yellow-500/40'}`}>
+            <div className="flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{alert.text}</span>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </button>
+  );
 
   return (
-    <div className="min-h-screen py-8 px-4">
-      <div className="max-w-6xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center mb-8">
-            <Button variant="ghost" onClick={() => navigate(`/host/${eventId}`)} className="text-white hover:bg-white/10 mr-4">
-              <ArrowLeft />
-            </Button>
-            <h1 className="text-3xl font-bold text-white">Panel del Planner</h1>
-          </div>
+    <div className="p-4 md:p-6">
+      <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
+        {/* Barra superior */}
+        <div className="flex items-center gap-3 mb-4">
+          <Button variant="ghost" onClick={() => navigate(-1)} className="text-white hover:bg-white/10">
+            <ArrowLeft className="w-4 h-4" />
+          </Button>
+          <h1 className="text-2xl font-bold text-white">Planner</h1>
+        </div>
 
-          {loading ? <div className="text-center text-white">Cargando...</div> :
-            <div className="grid lg:grid-cols-3 gap-6 mb-8">
-              <div className="lg:col-span-2 grid md:grid-cols-2 gap-6">
-                {modules.map((mod, i) => (
-                  <motion.div
-                    key={mod.path}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1 * i }}
-                    className={`bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 cursor-pointer hover:border-${mod.color}-500/50 hover:bg-${mod.color}-500/10 transition-all`}
-                    onClick={() => navigate(`/host/${eventId}/planner/${mod.path}`)}
-                  >
-                    <div className={`text-${mod.color}-300 mb-3`}>{React.cloneElement(mod.icon, { className: "w-8 h-8" })}</div>
-                    <h2 className="text-xl font-bold text-white">{mod.name}</h2>
-                    <p className="text-gray-400">Gestiona {mod.name.toLowerCase()} de tu evento.</p>
-                  </motion.div>
-                ))}
-              </div>
-              <div className="space-y-6">
-                <SummaryCard icon={<ListChecks className="text-cyan-300" />} title="Próximas Tareas">
-                  {summary.upcomingTasks.length > 0 ? (
-                    <ul className="space-y-2 text-sm">
-                      {summary.upcomingTasks.map(task => (
-                        <li key={task.id} className="flex justify-between items-center">
-                          <span className="text-gray-200">{task.title}</span>
-                          <span className="text-gray-400 text-xs">{new Date(task.due_date).toLocaleDateString()}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : <p className="text-sm text-gray-400">No hay tareas pendientes.</p>}
-                </SummaryCard>
-                <SummaryCard icon={<CalendarClock className="text-purple-300" />} title="Siguiente en el Cronograma">
-                  {summary.nextTimelineItem ? (
-                    <div className="text-sm">
-                      <p className="text-gray-200 font-semibold">{summary.nextTimelineItem.title}</p>
-                      <p className="text-gray-400 text-xs">{new Date(summary.nextTimelineItem.start_time).toLocaleString()}</p>
-                    </div>
-                  ) : <p className="text-sm text-gray-400">No hay próximos hitos.</p>}
-                </SummaryCard>
-                <SummaryCard icon={<Banknote className="text-green-300" />} title="Resumen de Presupuesto">
-                  <div className="text-sm space-y-1">
-                    <p className="flex justify-between"><span>Estimado:</span> <span className="font-semibold text-gray-200">${summary.budget.estimated.toLocaleString()}</span></p>
-                    <p className="flex justify-between"><span>Real:</span> <span className="font-semibold text-gray-200">${summary.budget.actual.toLocaleString()}</span></p>
-                  </div>
-                </SummaryCard>
-              </div>
-            </div>
-          }
-        </motion.div>
-      </div>
+        {/* Sección: Resumen (datos, NO botones) */}
+        <div className="mb-6">
+          <h2 className="text-sm font-semibold text-white/80 mb-2">Resumen</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            <InfoStatCard
+              label="Próximo hito"
+              value={summary.nextItem ? summary.nextItem.title : '—'}
+              sub={summary.nextItem ? new Date(summary.nextItem.start_ts).toLocaleString() : ''}
+            />
+            <InfoStatCard
+              label="Tareas pendientes"
+              value={<span className="text-2xl">{summary.pendingTasks}</span>}
+              sub="en el plan"
+            />
+            <InfoStatCard
+              label="Presupuesto"
+              value={`$${summary.budget.actual.toLocaleString()} / $${summary.budget.estimated.toLocaleString()}`}
+              sub="gastado / estimado"
+            />
+          </div>
+        </div>
+
+        {/* Sección: Módulos con métricas y alertas */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ModuleCard
+            icon={<ClipboardList className="w-5 h-5 text-white" />}
+            title="Tareas y Checklist"
+            desc="Organiza pendientes, prioridades y responsables."
+            path={`/host/${eventId}/planner/tasks`}
+            lines={[
+              { text: `Pendientes: ${stats.tasks.pending}` },
+              { text: `Completadas: ${stats.tasks.completed}` },
+            ]}
+            alert={ stats.tasks.overdue > 0 ? { show: true, severity: 'danger', text: `Vencidas: ${stats.tasks.overdue}` } : null }
+          />
+
+          <ModuleCard
+            icon={<CalendarClock className="w-5 h-5 text-white" />}
+            title="Cronograma"
+            desc="Run of show del evento, con horas y responsables."
+            path={`/host/${eventId}/planner/timeline`}
+            lines={[
+              { text: `Hoy: ${stats.timeline.today}` },
+              { text: `Próximos 7 días: ${stats.timeline.upcoming7}` },
+              stats.timeline.nextItem ? { text: `Siguiente: ${new Date(stats.timeline.nextItem.start_ts).toLocaleString()}` } : null,
+            ].filter(Boolean)}
+          />
+
+          <ModuleCard
+            icon={<Wallet className="w-5 h-5 text-white" />}
+            title="Presupuesto y Pagos"
+            desc="Costos, pagos y seguimiento financiero."
+            path={`/host/${eventId}/planner/budget`}
+            lines={[
+              { text: `Gastado: $${stats.budget.actual.toLocaleString()}` },
+              { text: `Estimado: $${stats.budget.estimated.toLocaleString()}` },
+            ]}
+            alert={ stats.budget.overdueAmount > 0 ? { show: true, severity: 'danger', text: `Vencido: $${stats.budget.overdueAmount.toLocaleString()}` } : null }
+          />
+
+          <ModuleCard
+            icon={<Briefcase className="w-5 h-5 text-white" />}
+            title="Proveedores"
+            desc="Directorio de proveedores vinculados al evento."
+            path={`/host/${eventId}/planner/providers`}
+            lines={[{ text: `Total: ${stats.providers.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<Users className="w-5 h-5 text-white" />}
+            title="Equipo"
+            desc="Miembros del equipo y roles asignados."
+            path={`/host/${eventId}/planner/team`}
+            lines={[{ text: `Miembros: ${stats.team.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<Building2 className="w-5 h-5 text-white" />}
+            title="Lugares / Venues"
+            desc="Locaciones y logística de cada espacio."
+            path={`/host/${eventId}/planner/venues`}
+            lines={[{ text: `Lugares: ${stats.venues.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<ChefHat className="w-5 h-5 text-white" />}
+            title="Catering"
+            desc="Menús, proveedores y detalles de servicio."
+            path={`/host/${eventId}/planner/catering`}
+            lines={[{ text: `Ítems: ${stats.catering.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<Gift className="w-5 h-5 text-white" />}
+            title="Regalos"
+            desc="Lista de obsequios y agradecimientos."
+            path={`/host/${eventId}/planner/gifts`}
+            lines={[{ text: `Regalos: ${stats.gifts.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<FileText className="w-5 h-5 text-white" />}
+            title="Documentos"
+            desc="Contratos, PDFs y archivos adjuntos."
+            path={`/host/${eventId}/planner/documents`}
+            lines={[{ text: `Documentos: ${stats.documents.count}` }]}
+          />
+
+          <ModuleCard
+            icon={<Image className="w-5 h-5 text-white" />}
+            title="Inspiración"
+            desc="Moodboard y referencias visuales."
+            path={`/host/${eventId}/planner/inspiration`}
+            lines={[{ text: `Ideas: ${stats.inspiration.count}` }]}
+          />
+        </div>
+      </motion.div>
     </div>
   );
 };
-
-const SummaryCard = ({ icon, title, children }) => (
-  <div className="bg-white/5 backdrop-blur-sm rounded-2xl p-4 border border-white/10">
-    <h3 className="font-semibold text-white mb-3 flex items-center gap-2">{icon}{title}</h3>
-    {children}
-  </div>
-);
 
 export default PlannerDashboard;

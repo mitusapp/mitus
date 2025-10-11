@@ -91,7 +91,7 @@ const PlannerGifts = () => {
         <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center">
-              <Button variant="ghost" onClick={() => navigate(`/host/${eventId}/planner`)} className="text-white hover:bg-white/10 mr-4"><ArrowLeft /></Button>
+              <Button variant="ghost" onClick={() => navigate(-1)} className="text-white hover:bg-white/10 mr-4"><ArrowLeft /></Button>
               <div><h1 className="text-2xl font-bold text-white">Regalos y Agradecimientos</h1></div>
             </div>
             <Button onClick={() => handleOpenModal()} className="bg-pink-600 hover:bg-pink-700"><Plus className="w-4 h-4 mr-2" />Añadir Regalo</Button>
