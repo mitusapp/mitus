@@ -50,6 +50,9 @@ const ForgotPasswordPage = lazy(() => import('@/pages/ForgotPasswordPage'));
 const UpdatePasswordPage = lazy(() => import('@/pages/UpdatePasswordPage'));
 const GlobalSettingsPage = lazy(() => import('@/pages/GlobalSettingsPage'));
 
+// 👇 NUEVO: callback OAuth
+const AuthCallback = lazy(() => import('@/pages/AuthCallback'));
+
 function App() {
   return (
     <>
@@ -68,6 +71,9 @@ function App() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/login" element={<LoginPage />} />
+              {/* 👇 NUEVO: ruta pública para el retorno de OAuth */}
+              <Route path="/auth/callback" element={<AuthCallback />} />
+
               <Route path="/signup" element={<SignUpPage />} />
               <Route path="/signup-confirm" element={<SignUpConfirmPage />} />
               <Route path="/forgot-password" element={<ForgotPasswordPage />} />

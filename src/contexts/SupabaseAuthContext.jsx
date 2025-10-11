@@ -149,7 +149,7 @@ export const AuthProvider = ({ children }) => {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/login`,
+        redirectTo: `${window.location.origin}/auth/callback`,
         queryParams: provider === 'google' ? { prompt: 'select_account' } : undefined,
       },
     });
