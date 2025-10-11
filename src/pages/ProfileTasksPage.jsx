@@ -9,8 +9,34 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import ProfileTabsNav from '@/components/profile/ProfileTabsNav';
 import ProfileHeaderBar from '@/components/profile/ProfileHeaderBar';
 import TasksPaymentsSummary from '@/components/profile/TasksPaymentsSummary';
+import { Button } from '@/components/ui/button';
 
 const SORT_DIR = { ASC: 'asc', DESC: 'desc' };
+
+/* --------------------------- Helpers de fecha (LOCAL) --------------------------- */
+// Acepta 'YYYY-MM-DD' o ISO con 'T' y devuelve Date local (inicio del día)
+const asLocalDay = (s) => {
+  if (!s) return null;
+  if (typeof s === 'string') {
+    const mIso = s.match(/^(\d{4}-\d{2}-\d{2})(?:T.*)?$/);
+    if (mIso) {
+      const [y, m, d] = mIso[1].split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setHours(0, 0, 0, 0);
+      return dt;
+    }
+  }
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+};
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const formatDate = (s) => {
+  const d = asLocalDay(s);
+  return d ? d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+};
+/* ------------------------------------------------------------------------------- */
 
 // Etiquetas amigables para tipos de evento (fallback si no existe event_type_label)
 const EVENT_TYPE_LABELS = {
@@ -51,6 +77,9 @@ const ProfileTasksPage = () => {
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState('due');
   const [sortDir, setSortDir] = useState(SORT_DIR.ASC);
+
+  // Filtro de estado para TAREAS
+  const [taskStatusFilter, setTaskStatusFilter] = useState('pending'); // 'pending' | 'in_progress' | 'completed'
 
   // ============== CARGA DE PERFIL ==============
   const fetchProfile = useCallback(async () => {
@@ -112,12 +141,11 @@ const ProfileTasksPage = () => {
     const fallbackOwner =
       (profileRef.current?.full_name?.split(' ')?.[0]) || '—';
 
-    // 3) Tareas (no completadas)
+    // 3) Tareas (TODOS los estados: pending, in_progress, completed)
     const { data: tasksData } = await supabase
       .from('planner_tasks')
       .select('id, title, due_date, status, event_id, priority, category, assignee_team_id, visibility')
-      .in('event_id', eventIds)
-      .neq('status', 'completed');
+      .in('event_id', eventIds); // <-- incluimos todos los estados
 
     const taskItems = (tasksData || []).map((t) => {
       const meta = eventMetaById[t.event_id] || {};
@@ -126,11 +154,13 @@ const ProfileTasksPage = () => {
       return {
         id: `task-${t.id}`,
         kind: 'task',
+        status: t.status || 'pending',   // <-- guardamos status para filtrar
+        eventId: t.event_id,             // para navegar al módulo tareas
         pendiente: 'Tarea',
         client: meta.client || '—',
         tipo: meta.tipo || '—',
         task: t.title || 'Tarea',
-        provider: t.category || null, // aquí usamos 'Categoría' de la tarea
+        provider: t.category || null,    // usamos 'Categoría' de la tarea
         amount: null,
         due: t.due_date || null,
         prioridad: t.priority || null,
@@ -138,7 +168,7 @@ const ProfileTasksPage = () => {
       };
     });
 
-    // 4) Presupuesto + Schedules de pago (pagos pendientes)
+    // 4) Presupuesto + Schedules de pago (SOLO pagos PENDIENTES)
     const { data: budgetItems } = await supabase
       .from('planner_budget_items')
       .select('id, event_id, name, provider_id, priority, assignee_team_id, planner_providers(name)')
@@ -154,7 +184,7 @@ const ProfileTasksPage = () => {
         .from('planner_payment_schedules')
         .select('id, budget_item_id, amount, due_date, priority, assignee_team_id, status')
         .in('budget_item_id', budgetIds)
-        .neq('status', 'paid');
+        .neq('status', 'paid'); // mantenemos SOLO pendientes (no alteramos lógica)
 
       paymentItems = (schedules || [])
         .map((s) => {
@@ -169,6 +199,8 @@ const ProfileTasksPage = () => {
           return {
             id: `pay-${s.id}`,
             kind: 'payment',
+            // status de pagos no se usa en el filtro de botones
+            eventId: bi.event_id,          // para navegar al módulo presupuesto
             pendiente: 'Pago',
             client: meta.client || '—',
             tipo: meta.tipo || '—',
@@ -201,31 +233,45 @@ const ProfileTasksPage = () => {
     return () => { mounted = false; };
   }, [user, fetchProfile, fetchActionItems]);
 
-  // ============== BUSCADOR & ORDEN ==============
+  // Lista para el RESUMEN (no alteramos su lógica original: solo pendientes)
+  const itemsForSummary = useMemo(
+    () => items.filter((it) => it.kind !== 'task' || it.status !== 'completed'),
+    [items]
+  );
+
+  // ============== BUSCADOR & ORDEN & FILTRO ==============
   const filtered = useMemo(() => {
     const q = (search || '').trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((it) => {
-      const haystack = [
-        it.client || '',
-        it.tipo || '',
-        it.pendiente || '',
-        it.task || '',
-        it.provider || '',
-        it.owner || '',
-        it.prioridad || '',
-        it.amount != null ? String(it.amount) : '',
-      ]
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [items, search]);
+
+    return items
+      // filtro por estado SOLO para tareas
+      .filter((it) => (it.kind !== 'task') || (it.status === taskStatusFilter))
+      // filtro de texto
+      .filter((it) => {
+        if (!q) return true;
+        const haystack = [
+          it.client || '',
+          it.tipo || '',
+          it.pendiente || '',
+          it.task || '',
+          it.provider || '',
+          it.owner || '',
+          it.prioridad || '',
+          it.amount != null ? String(it.amount) : '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      });
+  }, [items, search, taskStatusFilter]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const dir = sortDir === SORT_DIR.ASC ? 1 : -1;
-    const toTime = (v) => (v ? new Date(v).getTime() : Number.POSITIVE_INFINITY);
+    const toTime = (v) => {
+      const d = asLocalDay(v);
+      return d ? d.getTime() : Number.POSITIVE_INFINITY;
+    };
 
     arr.sort((a, b) => {
       switch (sortKey) {
@@ -237,6 +283,7 @@ const ProfileTasksPage = () => {
           return (a.pendiente || '').localeCompare(b.pendiente || '') * dir;
         case 'task':
           return (a.task || '').localeCompare(b.task || '') * dir;
+        case 'date': // columna "Fecha"
         case 'due':
           return (toTime(a.due) - toTime(b.due)) * dir;
         case 'prioridad': {
@@ -263,8 +310,9 @@ const ProfileTasksPage = () => {
   // ============== RENDER HELPERS ==============
   const formatDueBadge = (due) => {
     if (!due) return <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">—</span>;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const d = new Date(due); d.setHours(0, 0, 0, 0);
+    const today = startOfToday();
+    const d = asLocalDay(due);
+    if (!d) return <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">—</span>;
     const diffDays = Math.ceil((d - today) / (1000 * 60 * 60 * 24));
     if (diffDays < 0) {
       return (
@@ -287,6 +335,14 @@ const ProfileTasksPage = () => {
     );
   };
 
+  // Navegar al módulo adecuado al hacer clic en la fila
+  const goToItemModule = (row) => {
+    if (!row?.eventId) return;
+    const base = `/host/${row.eventId}/planner`;
+    if (row.kind === 'task') navigate(`${base}/tasks`);
+    else navigate(`${base}/budget`);
+  };
+
   if (loading) return <LoadingSpinner />;
 
   return (
@@ -305,31 +361,65 @@ const ProfileTasksPage = () => {
           <ProfileTabsNav />
           <div className="mt-6" />   {/* 24px aprox */}
 
-          {/* === Contenido: Tareas === */}
-          <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
-            <h1 className="text-3xl md:text-4xl font-bold text-[#1E1E1E] flex items-center gap-2">
-              <CheckSquare className="w-6 h-6 text-[#B9A7F9]" /> Tareas
-            </h1>
-            <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <input
-                type="search"
-                placeholder="Buscar por anfitrión, tipo, pendiente, título, proveedor o responsable…"
-                className="w-full p-2 pl-9 rounded-lg border border-gray-300 bg-white text-sm text-[#1E1E1E] focus:ring-2 focus:ring-[#9E7977]"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                aria-label="Buscar en lista de tareas y pagos"
-              />
+          {/* === Controles sticky: Filtro por estado + Buscador === */}
+          <div className="sticky top-12 z-40 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b border-[#EDEAE7] mb-6">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 py-3">
+              <h1 className="text-3xl md:text-4xl font-bold text-[#1E1E1E] flex items-center gap-2">
+                <CheckSquare className="w-6 h-6 text-[#B9A7F9]" /> Tareas
+              </h1>
+
+              <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-end w-full">
+                {/* Botones de filtro de estado (solo afectan TAREAS) */}
+                <div className="flex bg-white rounded-lg border border-gray-300 p-1 w-full md:w-auto">
+                  <Button
+                    variant={taskStatusFilter === 'pending' ? 'default' : 'ghost'}
+                    className={taskStatusFilter === 'pending' ? 'bg-[#7A49FF] hover:bg-[#6a3fe0] text-white' : 'text-[#1E1E1E]'}
+                    onClick={() => setTaskStatusFilter('pending')}
+                    aria-pressed={taskStatusFilter === 'pending'}
+                  >
+                    Pendientes
+                  </Button>
+                  <Button
+                    variant={taskStatusFilter === 'in_progress' ? 'default' : 'ghost'}
+                    className={taskStatusFilter === 'in_progress' ? 'bg-[#7A49FF] hover:bg-[#6a3fe0] text-white' : 'text-[#1E1E1E]'}
+                    onClick={() => setTaskStatusFilter('in_progress')}
+                    aria-pressed={taskStatusFilter === 'in_progress'}
+                  >
+                    En Proceso
+                  </Button>
+                  <Button
+                    variant={taskStatusFilter === 'completed' ? 'default' : 'ghost'}
+                    className={taskStatusFilter === 'completed' ? 'bg-[#7A49FF] hover:bg-[#6a3fe0] text-white' : 'text-[#1E1E1E]'}
+                    onClick={() => setTaskStatusFilter('completed')}
+                    aria-pressed={taskStatusFilter === 'completed'}
+                  >
+                    Completadas
+                  </Button>
+                </div>
+
+                {/* Buscador */}
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="search"
+                    placeholder="Buscar por anfitrión, tipo, pendiente, título, proveedor o responsable…"
+                    className="w-full p-2 pl-9 rounded-lg border border-gray-300 bg-white text-sm text-[#1E1E1E] focus:ring-2 focus:ring-[#9E7977]"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    aria-label="Buscar en lista de tareas y pagos"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* === RESUMEN (TASKS + PAYMENT SCHEDULES) === */}
-          <TasksPaymentsSummary items={items} initialRange="week" />
+          {/* === RESUMEN (usa SOLO pendientes como antes) === */}
+          <TasksPaymentsSummary items={itemsForSummary} initialRange="week" />
 
           {/* === LISTA === */}
           <div className="bg-white rounded-2xl border border-[#DCD9D6]">
             <div className="overflow-x-auto">
-              <table className="w-full text-left min-w-[1040px]">
+              <table className="w-full text-left min-w-[1120px]">
                 <thead>
                   <tr className="border-b border-[#EDEAE7] text-sm text-[#5E5E5E]">
                     <th className="p-3 cursor-pointer select-none" onClick={() => toggleSort('client')}>
@@ -344,6 +434,10 @@ const ProfileTasksPage = () => {
                     <th className="p-3 cursor-pointer select-none" onClick={() => toggleSort('task')}>
                       <div className="flex items-center gap-2">Tarea / Pago <ArrowUpDown className="w-4 h-4" /></div>
                     </th>
+                    {/* COLUMNA: Fecha (ordenable) */}
+                    <th className="p-3 cursor-pointer select-none" onClick={() => toggleSort('date')}>
+                      <div className="flex items-center gap-2">Fecha <ArrowUpDown className="w-4 h-4" /></div>
+                    </th>
                     <th className="p-3 cursor-pointer select-none" onClick={() => toggleSort('due')}>
                       <div className="flex items-center gap-2">Vencimiento <ArrowUpDown className="w-4 h-4" /></div>
                     </th>
@@ -357,7 +451,14 @@ const ProfileTasksPage = () => {
                 </thead>
                 <tbody>
                   {sorted.map((row) => (
-                    <tr key={row.id} className="border-b border-[#F3F1EF] hover:bg-[#FAF9F8]">
+                    <tr
+                      key={row.id}
+                      className="border-b border-[#F3F1EF] hover:bg-[#FAF9F8] cursor-pointer"
+                      onClick={() => goToItemModule(row)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') goToItemModule(row); }}
+                      tabIndex={0}
+                      title={row.kind === 'task' ? 'Ir a Tareas' : 'Ir a Presupuesto'}
+                    >
                       <td className="p-3">
                         <div className="flex items-center gap-3">
                           <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5ECFF] text-[#7A49FF] text-sm font-semibold">👥</span>
@@ -386,6 +487,9 @@ const ProfileTasksPage = () => {
                           )
                         )}
                       </td>
+                      {/* Celda: Fecha (plana) */}
+                      <td className="p-3 text-[#1E1E1E]">{formatDate(row.due)}</td>
+                      {/* Celda: Badge de vencimiento relativo */}
                       <td className="p-3">{formatDueBadge(row.due)}</td>
                       <td className="p-3">{priorityBadge(row.prioridad)}</td>
                       <td className="p-3 text-[#1E1E1E]">{row.owner}</td>

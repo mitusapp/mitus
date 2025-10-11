@@ -11,17 +11,63 @@ export default function TasksKanban({
   labelFromServiceType,  // (value) => string
   teamMembers = [],      // [{id,name}]
 }) {
+
   const teamMap = useMemo(() => {
     const m = {};
     (teamMembers || []).forEach((t) => { m[t.id] = t.name; });
     return m;
   }, [teamMembers]);
 
-  const columns = useMemo(() => ({
-    pending: tasks.filter((t) => t.status === 'pending'),
-    in_progress: tasks.filter((t) => t.status === 'in_progress'),
-    completed: tasks.filter((t) => t.status === 'completed'),
-  }), [tasks]);
+  // --- Utilidades de fecha y orden ---
+  const parseLocalDate = (d) => {
+    if (!d) return null;
+
+    if (typeof d === 'string') {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        const [y, m, day] = d.split('-').map(Number);
+        return new Date(y, m - 1, day); // local
+      }
+      const mIso = d.match(/^(\d{4}-\d{2}-\d{2})T/);
+      if (mIso) {
+        const [y, m, day] = mIso[1].split('-').map(Number);
+        return new Date(y, m - 1, day); // día local sin desfase
+      }
+    }
+
+    const dd = new Date(d);
+    return Number.isNaN(dd.getTime()) ? null : dd;
+  };
+
+  const fmtDate = (d) => {
+    const dd = parseLocalDate(d);
+    return dd ? dd.toLocaleDateString() : 'Sin fecha';
+  };
+
+  const prioRank = (p) => ({ high: 0, medium: 1, low: 2 }[p] ?? 3);
+  const compareTasks = (a, b) => {
+    const ta = parseLocalDate(a?.due_date)?.getTime() ?? Number.POSITIVE_INFINITY;
+    const tb = parseLocalDate(b?.due_date)?.getTime() ?? Number.POSITIVE_INFINITY;
+    if (ta !== tb) return ta - tb;
+    const pa = prioRank(a?.priority);
+    const pb = prioRank(b?.priority);
+    if (pa !== pb) return pa - pb;
+    return (a?.title || '').localeCompare(b?.title || '');
+  };
+  // -----------------------------------
+
+  const columns = useMemo(() => {
+    const by = (status) =>
+      (tasks || [])
+        .filter((t) => t.status === status)
+        .slice()
+        .sort(compareTasks);
+
+    return {
+      pending: by('pending'),
+      in_progress: by('in_progress'),
+      completed: by('completed'),
+    };
+  }, [tasks]);
 
   const statusLabel = {
     pending: 'Pendiente',
@@ -39,8 +85,6 @@ export default function TasksKanban({
     const label = { low: 'Baja', medium: 'Media', high: 'Alta' }[p] || p;
     return <span className={`ml-2 text-xs px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
   };
-
-  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : 'Sin fecha');
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

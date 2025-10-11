@@ -10,28 +10,28 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 
-// Nota: Mantiene todas las funciones. Solo mejora el hub visual y agrega
-// métricas/alertas dentro de cada botón de módulo. Buscador y botones rápidos: eliminados.
+/* -------------------------- Helpers de fecha (LOCAL) -------------------------- */
+// 'YYYY-MM-DD' o ISO con 'T' -> Date local en el inicio del día
+const asLocalDay = (s) => {
+  if (!s) return null;
+  if (typeof s === 'string') {
+    const mIso = s.match(/^(\d{4}-\d{2}-\d{2})(?:T.*)?$/);
+    if (mIso) {
+      const [y, m, d] = mIso[1].split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setHours(0, 0, 0, 0);
+      return dt;
+    }
+  }
+  const dt = new Date(s);
+  if (Number.isNaN(dt.getTime())) return null;
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+};
 
-const tzOffset = '-05:00';
-const startOfTodayISO = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const pad = (n) => String(n).padStart(2, '0');
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  return `${y}-${m}-${day}T00:00:00${tzOffset}`;
-};
-const endOfTodayISO = () => {
-  const d = new Date();
-  d.setHours(23, 59, 59, 999);
-  const pad = (n) => String(n).padStart(2, '0');
-  const y = d.getFullYear();
-  const m = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  return `${y}-${m}-${day}T23:59:59${tzOffset}`;
-};
+const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+const endOfToday   = () => { const d = new Date(); d.setHours(23,59,59,999); return d; };
+/* ---------------------------------------------------------------------------- */
 
 const PlannerDashboard = () => {
   const { eventId } = useParams();
@@ -60,9 +60,7 @@ const PlannerDashboard = () => {
 
   const fetchSummaryAndStats = useCallback(async () => {
     try {
-      const nowIso = new Date().toISOString();
-      const sToday = startOfTodayISO();
-      const eToday = endOfTodayISO();
+      const now = new Date();
 
       // 1) Tareas
       const { data: tasksData, error: tasksErr } = await supabase
@@ -70,16 +68,20 @@ const PlannerDashboard = () => {
         .select('id, status, due_date')
         .eq('event_id', eventId);
       if (tasksErr) throw tasksErr;
+
       const pending = (tasksData || []).filter(t => t.status !== 'completed').length;
       const completed = (tasksData || []).filter(t => t.status === 'completed').length;
-      const overdue = (tasksData || []).filter(t => t.due_date && new Date(t.due_date) < new Date(sToday) && t.status !== 'completed').length;
+      const overdue = (tasksData || []).filter(t => {
+        const due = asLocalDay(t.due_date);
+        return due && due < startOfToday() && t.status !== 'completed';
+      }).length;
 
       // 2) Cronograma
       const { data: tlNext } = await supabase
         .from('planner_timeline_items')
         .select('id, title, start_ts, start_date')
         .eq('event_id', eventId)
-        .gt('start_ts', nowIso)
+        .gt('start_ts', now.toISOString())
         .order('start_ts', { ascending: true })
         .limit(1);
       const nextItem = (tlNext && tlNext[0]) || null;
@@ -88,10 +90,24 @@ const PlannerDashboard = () => {
         .from('planner_timeline_items')
         .select('id, start_ts, start_date')
         .eq('event_id', eventId);
-      const toTS = (it) => it.start_ts ? new Date(it.start_ts) : (it.start_date ? new Date(`${it.start_date}T00:00:00${tzOffset}`) : null);
-      const todayCount = (tlAll || []).filter(it => { const d = toTS(it); if (!d) return false; return d >= new Date(sToday) && d <= new Date(eToday); }).length;
-      const in7 = new Date(); in7.setDate(in7.getDate()+7);
-      const upcoming7 = (tlAll || []).filter(it => { const d = toTS(it); if (!d) return false; return d > new Date() && d <= in7; }).length;
+
+      const toTS = (it) => it.start_ts
+        ? new Date(it.start_ts)
+        : (it.start_date ? asLocalDay(it.start_date) : null);
+
+      const todayStart = startOfToday();
+      const todayEnd = endOfToday();
+
+      const todayCount = (tlAll || []).filter(it => {
+        const d = toTS(it);
+        return d && d >= todayStart && d <= todayEnd;
+      }).length;
+
+      const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+      const upcoming7 = (tlAll || []).filter(it => {
+        const d = toTS(it);
+        return d && d > now && d <= in7;
+      }).length;
 
       // 3) Presupuesto y pagos (monto vencido)
       const { data: budgetData, error: budgetErr } = await supabase
@@ -99,26 +115,41 @@ const PlannerDashboard = () => {
         .select('id, estimated_cost, actual_cost')
         .eq('event_id', eventId);
       if (budgetErr) throw budgetErr;
+
       const estimated = (budgetData || []).reduce((s, r) => s + Number(r.estimated_cost || 0), 0);
       const actual = (budgetData || []).reduce((s, r) => s + Number(r.actual_cost || 0), 0);
       const ids = (budgetData || []).map(b => b.id);
+
       let overdueAmount = 0;
       if (ids.length > 0) {
-        const [{ data: pays }, { data: sched } ] = await Promise.all([
+        const [{ data: pays }, { data: sched }] = await Promise.all([
           supabase.from('planner_payments').select('budget_item_id, amount, payment_date').in('budget_item_id', ids),
           supabase.from('planner_payment_schedules').select('budget_item_id, amount, due_date').in('budget_item_id', ids),
         ]);
-        const paidToDate = (pays || []).filter(p => p.payment_date && new Date(p.payment_date) <= new Date()).reduce((sum,p)=> sum + Number(p.amount || 0), 0);
-        const scheduledDue = (sched || []).filter(s => s.due_date && new Date(s.due_date) < new Date(sToday)).reduce((sum,s)=> sum + Number(s.amount || 0), 0);
+
+        const paidToDate = (pays || [])
+          .filter(p => {
+            const d = asLocalDay(p.payment_date);
+            return d && d <= endOfToday();
+          })
+          .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+        const scheduledDue = (sched || [])
+          .filter(s => {
+            const d = asLocalDay(s.due_date);
+            return d && d < startOfToday();
+          })
+          .reduce((sum, s) => sum + Number(s.amount || 0), 0);
+
         overdueAmount = Math.max(0, scheduledDue - paidToDate);
       }
 
       // 4) Conteos simples de otros módulos
-      async function safeCount(table, filter) {
+      async function safeCount(table, filterFn) {
         try {
-          const q = supabase.from(table).select('*', { head: true, count: 'exact' });
-          if (filter) filter(q);
-          const res = await (filter ? filter(supabase.from(table).select('*', { head: true, count: 'exact' })) : q);
+          let q = supabase.from(table).select('*', { head: true, count: 'exact' });
+          if (filterFn) q = filterFn(q);
+          const res = await q;
           return res.count || 0;
         } catch { return 0; }
       }
@@ -213,7 +244,13 @@ const PlannerDashboard = () => {
             <InfoStatCard
               label="Próximo hito"
               value={summary.nextItem ? summary.nextItem.title : '—'}
-              sub={summary.nextItem ? new Date(summary.nextItem.start_ts).toLocaleString() : ''}
+              sub={
+                summary.nextItem
+                  ? (summary.nextItem.start_ts
+                      ? new Date(summary.nextItem.start_ts).toLocaleString()
+                      : (asLocalDay(summary.nextItem.start_date)?.toLocaleDateString() || ''))
+                  : ''
+              }
             />
             <InfoStatCard
               label="Tareas pendientes"
@@ -250,7 +287,15 @@ const PlannerDashboard = () => {
             lines={[
               { text: `Hoy: ${stats.timeline.today}` },
               { text: `Próximos 7 días: ${stats.timeline.upcoming7}` },
-              stats.timeline.nextItem ? { text: `Siguiente: ${new Date(stats.timeline.nextItem.start_ts).toLocaleString()}` } : null,
+              stats.timeline.nextItem
+                ? {
+                    text: `Siguiente: ${
+                      stats.timeline.nextItem.start_ts
+                        ? new Date(stats.timeline.nextItem.start_ts).toLocaleString()
+                        : (asLocalDay(stats.timeline.nextItem.start_date)?.toLocaleDateString() || '')
+                    }`
+                  }
+                : null,
             ].filter(Boolean)}
           />
 

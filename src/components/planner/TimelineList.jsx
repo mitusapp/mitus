@@ -14,6 +14,14 @@ export default function TimelineList({
   emptyMessage = 'No hay hitos en el cronograma.',
   eventHeader = '', // para encabezado del PDF
 }) {
+  // -------------------- Estado de filtros y orden --------------------
+  const [fCat, setFCat] = useState('');
+  const [fSubj, setFSubj] = useState('');
+  const [fAssignee, setFAssignee] = useState('');
+  const [fLoc, setFLoc] = useState('');
+  const [sortField, setSortField] = useState('');
+  const [sortDir, setSortDir] = useState('asc');
+
   // Mapa rápido de id → nombre del equipo
   const teamMap = useMemo(() => {
     const m = new Map();
@@ -34,45 +42,7 @@ export default function TimelineList({
     return `${hh}:${min} ${am ? 'A.M.' : 'P.M.'}`;
   };
 
-  // -------------------- Filtros --------------------
-  const [fCat, setFCat] = useState('');
-  const [fSubj, setFSubj] = useState('');
-  const [fAssignee, setFAssignee] = useState('');
-  const [fLoc, setFLoc] = useState('');
-
-  const options = useMemo(() => {
-    const cats = new Map();
-    const subjs = new Map();
-    const ass = new Map();
-    const locs = new Set();
-    (items || []).forEach((it) => {
-      if (it.category) cats.set(it.category, labelFromServiceType ? (labelFromServiceType(it.category) || it.category) : it.category);
-      if (it.subject) subjs.set(it.subject, labelFromSubject ? (labelFromSubject(it.subject) || it.subject) : it.subject);
-      if (it.assignee_team_id) ass.set(it.assignee_team_id, teamMap.get(it.assignee_team_id) || it.assignee_team_id);
-      if (it.location) locs.add(it.location);
-    });
-    return {
-      cats: Array.from(cats, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es')),
-      subjs: Array.from(subjs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es')),
-      ass: Array.from(ass, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es')),
-      locs: Array.from(locs).sort((a, b) => a.localeCompare(b, 'es')),
-    };
-  }, [items, labelFromServiceType, labelFromSubject, teamMap]);
-
-  // -------------------- Orden secundario --------------------
-  const [sortField, setSortField] = useState(null); // 'category' | 'subject' | 'assignee' | 'location'
-  const [sortDir, setSortDir] = useState('asc');
-
-  const toggleSort = (field) => {
-    setSortField((prev) => (prev === field ? field : field));
-    setSortDir((prev) => (sortField === field ? (prev === 'asc' ? 'desc' : 'asc') : 'asc'));
-  };
-
-  const chronoKey = (it) => {
-    const d = it.start_date ? String(it.start_date) : '9999-12-31';
-    const t = it.start_time ? String(it.start_time).slice(0, 5) : '99:99';
-    return `${d}T${t}`; // garantiza orden cronológico primario
-  };
+  const chronoKey = (it) => `${it.start_date || ''} ${it.start_time || ''}`;
 
   const getFieldValue = (it, field) => {
     switch (field) {
@@ -89,7 +59,27 @@ export default function TimelineList({
     }
   };
 
-  // Aplica filtros y luego orden con prioridad cronológica
+  const options = useMemo(() => {
+    const cats = new Map();
+    const subjs = new Map();
+    const locs = new Map();
+    const assignees = new Map();
+
+    (items || []).forEach((it) => {
+      if (it.category) cats.set(it.category, labelFromServiceType ? (labelFromServiceType(it.category) || it.category) : it.category);
+      if (it.subject) subjs.set(it.subject, labelFromSubject ? (labelFromSubject(it.subject) || it.subject) : it.subject);
+      if (it.location) locs.set(it.location, it.location);
+      if (it.assignee_team_id) assignees.set(String(it.assignee_team_id), teamMap.get(it.assignee_team_id) || '');
+    });
+
+    return {
+      cats: Array.from(cats, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+      subjs: Array.from(subjs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+      locs: Array.from(locs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+      assignees: Array.from(assignees, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
+    };
+  }, [items, labelFromServiceType, labelFromSubject, teamMap]);
+
   const view = useMemo(() => {
     const filtered = (items || []).filter((it) => {
       if (fCat && it.category !== fCat) return false;
@@ -121,25 +111,100 @@ export default function TimelineList({
     const win = window.open('', '_blank');
     if (!win) return;
 
+    // ---- Título de documento dinámico (tipo + hosts + fecha) ----
+    const headerForTitle = (eventHeader || '').trim() || 'Evento';
+    let dateForTitle = '';
+    const earliest = (rows || []).map(it => it.start_date).filter(Boolean).sort()[0];
+    if (earliest && earliest.length === 10 && earliest[4] === '-') {
+      const [y,m,d] = earliest.split('-');
+      dateForTitle = `${d}-${m}-${y}`;
+    }
+    const rawTitle = `Cronograma ${headerForTitle}${dateForTitle ? ' ' + dateForTitle : ''}`;
+    const docTitle = rawTitle
+      .replaceAll('/', ' ')
+      .replaceAll(':', ' ')
+      .replaceAll('*', ' ')
+      .replaceAll('?', ' ')
+      .replaceAll('"', ' ')
+      .replaceAll('<', ' ')
+      .replaceAll('>', ' ')
+      .replaceAll('|', ' ')
+      .trim();
+
+    // Tipografía y estilos de impresión profesionales
     const styles = `
       <style>
+        :root{
+          --ink:#0f172a;       /* slate-900 */
+          --muted:#64748b;     /* slate-500 */
+          --border:#e5e7eb;    /* gray-200 */
+          --bg:#ffffff;        /* white */
+          --head:#f8fafc;      /* slate-50 */
+          --accent:#111827;    /* gray-900 */
+        }
         *{ box-sizing:border-box; }
-        body{ font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding:24px; color:#111; }
-        h1{ font-size:20px; margin:0 0 4px; }
-        .sub{ color:#444; font-size:12px; margin:0 0 16px; }
-        table{ width:100%; border-collapse:collapse; }
-        th, td{ border:1px solid #ddd; padding:8px; font-size:12px; vertical-align:top; }
-        th{ background:#f3f4f6; text-align:left; }
-        .muted{ color:#666; font-size:11px; }
+        html,body{ margin:0; padding:0; background:var(--bg); color:var(--ink); }
+        body{ font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif; font-size:12px; line-height:1.45; }
+        .wrap{ padding:20px 24px 56px 24px; }
+        .header{
+          padding:16px 0 10px 0;
+          border-bottom:1px solid var(--border);
+          margin-bottom:12px;
+        }
+        .title{
+          font-size:18px; font-weight:800; letter-spacing:.2px; text-transform:uppercase;
+        }
+        .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
+        .meta{ color:var(--muted); font-size:11px; margin-top:4px; }
+
+        table{ width:100%; border-collapse:collapse; page-break-inside:auto; }
+        thead{ display:table-header-group; }
+        tfoot{ display:table-footer-group; }
+        th, td{ padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+        th{ background:var(--head); text-align:left; font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.3px; }
+        td{ font-size:12px; }
+
+        .col-time{ width:80px; white-space:nowrap; }
+        .col-what{ width:auto; }
+        .col-prov{ width:160px; }
+        .col-loc{ width:140px; }
+        .col-subj, .col-assignee, .col-cat{ width:120px; }
+
+        tr{ page-break-inside:avoid; break-inside:avoid; }
+        .activity{ font-weight:700; }
+        .muted{ color:var(--muted); }
+        .note{ font-style:italic; }
+        .badge{ display:inline-block; font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:9999px; }
+
+        .footer{
+          position:fixed; left:0; right:0; bottom:0;
+          border-top:1px solid var(--border);
+          padding:8px 24px;
+          font-size:11px; color:var(--muted);
+          background:var(--bg);
+        }
+        .page { counter-increment: page; }
+        .page-num::after { content: counter(page); }
+        .total-pages::after { content: counter(pages); }
+
+        @media print{ @page{ margin:16mm 12mm 16mm 12mm; } .wrap{ padding:0; } th, td{ padding:6px 8px; } .footer{ display:none; } }
+          .wrap{ padding:0 0 48px 0; }
+        }
       </style>
     `;
 
-    const toTime = (t)=> formatTime12(t) || '—';
+    const now = new Date();
+    const genAt = now.toLocaleString(undefined, { dateStyle: 'long', timeStyle: 'short' });
 
     const headerHtml = `
-      <h1>Cronograma / Run of Show</h1>
-      <div class="sub">${eventHeader || ''}</div>
+      <div class="header">
+        <div class="title">Cronograma / Run of Show</div>
+        <div class="sub">${eventHeader || ''}</div>
+        <div class="meta">Generado: ${genAt}</div>
+      </div>
     `;
+
+    const toTime = (t) => formatTime12(t) || '—';
 
     const rowsHtml = rows.map((it) => {
       const providers = (it.provider_ids || [])
@@ -147,18 +212,30 @@ export default function TimelineList({
         .filter(Boolean)
         .join(', ');
       const title = it.title || 'Sin título';
-      const desc = it.description ? `<div class=\"muted\">${it.description}</div>` : '';
-      const obs = it.observations ? `<div class=\"muted\"><em>Observaciones:</em> ${it.observations}</div>` : '';
+      const desc = it.description ? `<div class="muted">${it.description}</div>` : '';
+      const obs = it.observations ? `<div class="muted note">Observaciones: ${it.observations}</div>` : '';
+      const subj = `${getFieldValue(it,'subject') || '—'}`;
+      const assn = `${getFieldValue(it,'assignee') || '—'}`;
+      const cat  = `${getFieldValue(it,'category') || '—'}`;
+      const loc  = `${getFieldValue(it,'location') || '—'}`;
       return `
-        <tr>
-          <td>${toTime(it.start_time)}</td>
-          <td>${toTime(it.end_time)}</td>
-          <td><div><strong>${title}</strong></div>${desc}${obs}</td>
-          <td>${providers || '—'}</td>
-          <td>${getFieldValue(it,'location') || '—'}</td>
-          <td>${getFieldValue(it,'subject') || '—'}</td>
-          <td>${getFieldValue(it,'assignee') || '—'}</td>
-          <td>${getFieldValue(it,'category') || '—'}</td>
+        <tr class="page">
+          <td class="col-time">
+            ${toTime(it.start_time)}
+          </td>
+          <td class="col-time">
+            ${toTime(it.end_time)}
+          </td>
+          <td class="col-what">
+            <div class="activity">${title}</div>
+            ${desc}
+            ${obs}
+          </td>
+          <td class="col-prov">${providers || '—'}</td>
+          <td class="col-loc">${loc}</td>
+          <td class="col-subj">${subj}</td>
+          <td class="col-assignee">${assn}</td>
+          <td class="col-cat">${cat}</td>
         </tr>
       `;
     }).join('');
@@ -167,28 +244,41 @@ export default function TimelineList({
       <!doctype html>
       <html>
         <head>
-          <meta charset=\"utf-8\" />
-          <title>Cronograma</title>
+          <meta charset="utf-8" />
+          <title>${docTitle}</title>
           ${styles}
         </head>
         <body>
-          ${headerHtml}
-          <table>
-            <thead>
-              <tr>
-                <th>Hora inicio</th>
-                <th>Hora fin</th>
-                <th>Actividad / Descripción / Observaciones</th>
-                <th>Proveedor</th>
-                <th>Ubicación</th>
-                <th>Sujeto</th>
-                <th>Responsable</th>
-                <th>Categoría</th>
-              </tr>
-            </thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
-          <script>window.onload = function(){ window.print(); }</script>
+          <div class="wrap">
+            ${headerHtml}
+            <table>
+              <thead>
+                <tr>
+                  <th class="col-time">Hora inicio</th>
+                  <th class="col-time">Hora fin</th>
+                  <th class="col-what">Actividad / Descripción / Observaciones</th>
+                  <th class="col-prov">Proveedor(es)</th>
+                  <th class="col-loc">Ubicación</th>
+                  <th class="col-subj">Sujeto</th>
+                  <th class="col-assignee">Responsable</th>
+                  <th class="col-cat">Categoría</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+          </div>
+          <div class="footer">
+            <span>${eventHeader || 'Cronograma'}</span>
+            <span style="float:right">Página <span class="page-num"></span></span>
+          </div>
+          <script>
+            window.onload = () => {
+              try { window.focus(); } catch(e) {}
+              window.print();
+            };
+          </script>
         </body>
       </html>
     `;
@@ -213,136 +303,86 @@ export default function TimelineList({
         </select>
         <select className="px-2 py-2 rounded bg-white text-gray-900" value={fAssignee} onChange={(e)=>setFAssignee(e.target.value)}>
           <option value="">Responsable (todos)</option>
-          {options.ass.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
+          {options.assignees.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
         </select>
         <select className="px-2 py-2 rounded bg-white text-gray-900" value={fLoc} onChange={(e)=>setFLoc(e.target.value)}>
           <option value="">Ubicación (todas)</option>
-          {options.locs.map((loc)=> (<option key={loc} value={loc}>{loc}</option>))}
+          {options.locs.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
         </select>
-        <div className="flex items-center justify-end">
-          <Button onClick={exportPDF} className="bg-emerald-600 hover:bg-emerald-500">Exportar PDF</Button>
+
+        <div className="flex gap-2 justify-end">
+          <Button type="button" variant="secondary" onClick={() => setSortField('')}>Quitar orden</Button>
+          <Button type="button" onClick={exportPDF}>Exportar PDF</Button>
         </div>
       </div>
 
-      <table className="w-full text-sm">
-        <thead className="bg-white/5 text-gray-300">
-          <tr>
-            <th className="text-left p-3 font-medium">Hora inicio</th>
-            <th className="text-left p-3 font-medium">Hora fin</th>
-            <th className="text-left p-3 font-medium w-[40%]">Actividad / Descripción / Observaciones</th>
-            <th className="text-left p-3 font-medium">Proveedor</th>
-            <th className="text-left p-3 font-medium cursor-pointer select-none" onClick={()=>toggleSort('location')}>
-              <span className="inline-flex items-center gap-1">Ubicación <ArrowUpDown className="w-3.5 h-3.5" /></span>
-            </th>
-            <th className="text-left p-3 font-medium cursor-pointer select-none" onClick={()=>toggleSort('subject')}>
-              <span className="inline-flex items-center gap-1">Sujeto <ArrowUpDown className="w-3.5 h-3.5" /></span>
-            </th>
-            <th className="text-left p-3 font-medium cursor-pointer select-none" onClick={()=>toggleSort('assignee')}>
-              <span className="inline-flex items-center gap-1">Responsable <ArrowUpDown className="w-3.5 h-3.5" /></span>
-            </th>
-            <th className="text-left p-3 font-medium cursor-pointer select-none" onClick={()=>toggleSort('category')}>
-              <span className="inline-flex items-center gap-1">Categoría <ArrowUpDown className="w-3.5 h-3.5" /></span>
-            </th>
-            <th className="text-right p-3 font-medium">Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading && (
-            <tr>
-              <td colSpan={9} className="p-6 text-center text-gray-400">Cargando…</td>
+      {/* Tabla */}
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="bg-white/10 text-left">
+              <th className="px-3 py-2">Hora inicio</th>
+              <th className="px-3 py-2">Hora fin</th>
+              <th className="px-3 py-2">Actividad</th>
+              <th className="px-3 py-2">Proveedor(es)</th>
+              <th className="px-3 py-2">Ubicación</th>
+              <th className="px-3 py-2">Sujeto</th>
+              <th className="px-3 py-2">Responsable</th>
+              <th className="px-3 py-2">Categoría</th>
+              <th className="px-3 py-2"></th>
             </tr>
-          )}
-
-          {!loading && view.map((item) => {
-            const providers = (item.provider_ids || [])
-              .map((id) => providersMap.get(id)?.name)
-              .filter(Boolean);
-
-            const startTime = formatTime12(item.start_time);
-            const endTime = formatTime12(item.end_time);
-
-            const catLabel = labelFromServiceType ? (labelFromServiceType(item.category) || '') : (item.category || '');
-            const subjLabel = labelFromSubject ? (labelFromSubject(item.subject) || '') : (item.subject || '');
-            const assignee = item.assignee_team_id ? (teamMap.get(item.assignee_team_id) || '') : '';
-
-            return (
-              <tr key={item.id} className="border-b border-white/10 hover:bg-white/5 align-top">
-                {/* Hora inicio */}
-                <td className="p-3 whitespace-nowrap">
-                  <div className="text-gray-100 font-medium">{startTime || '—'}</div>
-                </td>
-
-                {/* Hora fin */}
-                <td className="p-3 whitespace-nowrap">
-                  <div className="text-gray-100 font-medium">{endTime || '—'}</div>
-                </td>
-
-                {/* Actividad / Descripción / Observaciones */}
-                <td className="p-3 w-[40%]">
-                  <div className="font-medium text-white line-clamp-1" title={item.title || 'Sin título'}>
-                    {item.title || 'Sin título'}
-                  </div>
-                  {item.description && (
-                    <div className="text-xs text-gray-400 line-clamp-3 mt-0.5" title={item.description}>
-                      {item.description}
-                    </div>
-                  )}
-                  {item.observations && (
-                    <div className="text-xs text-gray-400 line-clamp-3 mt-0.5" title={item.observations}>
-                      <span className="italic">Observaciones: </span>{item.observations}
-                    </div>
-                  )}
-                </td>
-
-                {/* Proveedor(es) */}
-                <td className="p-3">
-                  {providers.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {providers.map((name, i) => (
-                        <span key={`${item.id}-prov-${i}`} className="text-[11px] px-2 py-0.5 rounded bg-white/10 border border-white/20 text-white">
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </td>
-
-                {/* Ubicación */}
-                <td className="p-3 text-gray-200">{item.location || '—'}</td>
-
-                {/* Sujeto */}
-                <td className="p-3 text-gray-200">{subjLabel || '—'}</td>
-
-                {/* Responsable */}
-                <td className="p-3 text-gray-200">{assignee || '—'}</td>
-
-                {/* Categoría */}
-                <td className="p-3 text-gray-200">{catLabel || '—'}</td>
-
-                {/* Acciones */}
-                <td className="p-3">
-                  <div className="flex items-center justify-end gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => onEdit?.(item)} title="Editar">
-                      <Edit className="w-4 h-4 text-gray-300" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => onDelete?.(item.id)} title="Eliminar">
-                      <Trash2 className="w-4 h-4 text-red-400" />
-                    </Button>
-                  </div>
-                </td>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={9} className="px-3 py-8 text-center text-white/70">Cargando…</td>
               </tr>
-            );
-          })}
-
-          {!loading && view.length === 0 && (
-            <tr>
-              <td colSpan={9} className="p-6 text-center text-gray-400">{emptyMessage}</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+            {!loading && view.length === 0 && (
+              <tr>
+                <td colSpan={9} className="px-3 py-8 text-center text-white/70">{emptyMessage}</td>
+              </tr>
+            )}
+            {!loading && view.map((it) => {
+              const start = formatTime12(it.start_time);
+              const end = formatTime12(it.end_time);
+              const providers = (it.provider_ids || [])
+                .map((id) => providersMap.get(id)?.name)
+                .filter(Boolean)
+                .join(', ');
+              const subj = getFieldValue(it, 'subject') || '—';
+              const cat = getFieldValue(it, 'category') || '—';
+              const ass = getFieldValue(it, 'assignee') || '—';
+              return (
+                <tr key={it.id} className="border-b border-white/10">
+                  <td className="px-3 py-2 whitespace-nowrap">{start || '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{end || '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-semibold">{it.title || 'Sin título'}</div>
+                    {it.description && <div className="text-white/70 text-xs">{it.description}</div>}
+                    {it.observations && <div className="italic text-white/60 text-xs">Observaciones: {it.observations}</div>}
+                  </td>
+                  <td className="px-3 py-2">{providers || '—'}</td>
+                  <td className="px-3 py-2">{it.location || '—'}</td>
+                  <td className="px-3 py-2">{subj}</td>
+                  <td className="px-3 py-2">{ass}</td>
+                  <td className="px-3 py-2">{cat}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => onEdit && onEdit(it)}>
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => onDelete && onDelete(it)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -11,8 +11,34 @@ export default function TasksList({
   labelFromServiceType,  // (value) => string
   teamMembers = [],      // opcional: [{id, name}] para mostrar "Responsable"
 }) {
-  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : 'Sin fecha');
+  // ---- Helpers de fecha (local, sin desfases) -------------------------------
+  const parseLocalDate = (d) => {
+    if (!d) return null;
 
+    if (typeof d === 'string') {
+      // 'YYYY-MM-DD' -> construir en local
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        const [y, m, day] = d.split('-').map(Number);
+        return new Date(y, m - 1, day);
+      }
+      // ISO con 'T' -> tomar solo la parte de fecha
+      const mIso = d.match(/^(\d{4}-\d{2}-\d{2})T/);
+      if (mIso) {
+        const [y, m, day] = mIso[1].split('-').map(Number);
+        return new Date(y, m - 1, day);
+      }
+    }
+
+    const dd = new Date(d);
+    return Number.isNaN(dd.getTime()) ? null : dd;
+  };
+
+  const fmtDate = (d) => {
+    const dd = parseLocalDate(d);
+    return dd ? dd.toLocaleDateString() : 'Sin fecha';
+  };
+
+  // ---- Mapas y utilidades ---------------------------------------------------
   const teamMap = React.useMemo(() => {
     const map = {};
     (teamMembers || []).forEach((m) => { map[m.id] = m.name; });
@@ -44,6 +70,26 @@ export default function TasksList({
 
   const nextStatus = (s) => (s === 'completed' ? 'pending' : 'completed');
 
+  // ---- ORDEN: fecha (ASC) y, empate, prioridad (Alta->Media->Baja) ---------
+  const prioRank = (p) => ({ high: 0, medium: 1, low: 2 }[p] ?? 3);
+
+  const sortedTasks = React.useMemo(() => {
+    const toTime = (t) => {
+      const d = parseLocalDate(t?.due_date);
+      return d ? d.getTime() : Number.POSITIVE_INFINITY; // sin fecha al final
+    };
+    return [...(tasks || [])].sort((a, b) => {
+      const ta = toTime(a);
+      const tb = toTime(b);
+      if (ta !== tb) return ta - tb;                 // fecha cercana primero
+      const pa = prioRank(a?.priority);
+      const pb = prioRank(b?.priority);
+      if (pa !== pb) return pa - pb;                 // Alta antes que Media y Baja
+      return (a?.title || '').localeCompare(b?.title || ''); // estable
+    });
+  }, [tasks]);
+  // ---------------------------------------------------------------------------
+
   return (
     <div className="rounded border border-white/10 overflow-x-auto">
       <table className="w-full text-sm min-w-[900px]">
@@ -60,7 +106,7 @@ export default function TasksList({
           </tr>
         </thead>
         <tbody>
-          {tasks.map((task) => {
+          {sortedTasks.map((task) => {
             const completed = task.status === 'completed';
             const catLabel = labelFromServiceType?.(task.category) || task.category || '—';
             const assignee = task.assignee_team_id ? (teamMap[task.assignee_team_id] || '—') : '—';
@@ -88,7 +134,6 @@ export default function TasksList({
                 </td>
                 <td className="p-3 text-gray-200">{catLabel}</td>
                 <td className="p-3 text-gray-200">
-                  {/* repetimos chip pequeño por consistencia visual en la celda */}
                   {task.priority ? priorityChip(task.priority) : <span className="text-gray-400 text-xs">—</span>}
                 </td>
                 <td className="p-3 text-gray-200">{assignee}</td>
@@ -122,7 +167,7 @@ export default function TasksList({
               </tr>
             );
           })}
-          {(!tasks || tasks.length === 0) && (
+          {(!sortedTasks || sortedTasks.length === 0) && (
             <tr>
               <td colSpan={8} className="p-6 text-center text-gray-400">No hay tareas creadas.</td>
             </tr>

@@ -17,6 +17,32 @@ import TasksKanban from '@/components/planner/TasksKanban.jsx';
 import TaskFormModal from '@/components/planner/TaskFormModal.jsx';
 import TasksSummary from '@/components/planner/TasksSummary.jsx';
 
+/* --------------------------- Helpers de fecha (LOCAL) --------------------------- */
+// Acepta 'YYYY-MM-DD' o ISO con 'T' y devuelve Date local
+const parseLocalYMD = (s) => {
+  if (!s) return null;
+  if (typeof s === 'string') {
+    const mIso = s.match(/^(\d{4}-\d{2}-\d{2})(?:T.*)?$/);
+    if (mIso) {
+      const [y, m, d] = mIso[1].split('-').map(Number);
+      return new Date(y, m - 1, d); // local
+    }
+  }
+  const dt = new Date(s);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+};
+// Forzar valor apto para <input type="date">
+const ensureYMD = (s) => {
+  if (!s) return '';
+  return typeof s === 'string' && s.includes('T') ? s.split('T')[0] : s;
+};
+// Mostrar fecha corta en es-ES sin desfase
+const formatShortEsDate = (d) => {
+  const date = parseLocalYMD(d);
+  return date ? date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+};
+/* ------------------------------------------------------------------------------- */
+
 /** Catálogo de categorías (mismas que proveedores) */
 const SERVICE_TYPES = [
   { value: 'wedding_planner', label: 'Organizador/a de bodas' },
@@ -100,13 +126,6 @@ const PlannerTasks = () => {
   // ---- Encabezado tipo “Boda de Ana y Luis – 25/10/2025”
   const [eventHeader, setEventHeader] = useState('');
 
-  const formatShortEsDate = (d) => {
-    if (!d) return '';
-    const date = new Date(String(d).replace(/-/g, '/'));
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
-
   const fetchEventInfo = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -167,7 +186,7 @@ const PlannerTasks = () => {
         ? {
             title: task.title,
             description: task.description || '',
-            due_date: task.due_date || '',
+            due_date: ensureYMD(task.due_date || ''), // <-- Sanitiza ISO -> YMD para <input date>
             priority: task.priority || null,
             category: task.category || '',
             assignee_team_id: task.assignee_team_id || null,
@@ -194,7 +213,7 @@ const PlannerTasks = () => {
       event_id: eventId,
       title: formData.title,
       description: formData.description || null,
-      due_date: formData.due_date || null,
+      due_date: ensureYMD(formData.due_date) || null, // <-- Guardar siempre 'YYYY-MM-DD'
       priority: formData.priority || null,
       category: formData.category || null,
       assignee_team_id: formData.assignee_team_id || null,

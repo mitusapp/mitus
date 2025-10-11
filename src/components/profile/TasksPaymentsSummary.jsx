@@ -13,10 +13,11 @@ import {
 /* =========================
    Utils de fechas/moneda
    ========================= */
+// NORMALIZA SIEMPRE A DÍA LOCAL (ignora hora/zona)
 const asLocalDay = (d) => {
   if (!d) return null;
 
-  // Si viene Date, normaliza a 00:00 local
+  // Date -> a 00:00 local
   if (d instanceof Date) {
     if (Number.isNaN(d.getTime())) return null;
     const dd = new Date(d);
@@ -24,17 +25,16 @@ const asLocalDay = (d) => {
     return dd;
   }
 
-  // Si viene string:
   if (typeof d === 'string') {
-    // Solo fecha YYYY-MM-DD -> construir en local (evita que el navegador lo tome como UTC)
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-      const [y, m, day] = d.split('-').map(Number);
-      const dd = new Date(y, m - 1, day);
+    // 1) Si empieza por YYYY-MM-DD, usa SOLO esa parte (evita desfases por TZ)
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) {
+      const [y, mth, day] = m[1].split('-').map(Number);
+      const dd = new Date(y, mth - 1, day);
       dd.setHours(0, 0, 0, 0);
       return dd;
     }
-
-    // ISO completo u otros formatos válidos -> usar sin reemplazar
+    // 2) Otra cadena parseable
     const dd = new Date(d);
     if (Number.isNaN(dd.getTime())) return null;
     dd.setHours(0, 0, 0, 0);
@@ -91,18 +91,19 @@ const RANGE_OPTS = [
 
 const computeRange = (key) => {
   const start = todayStart();
-  if (key === 'today') return { start, end: addDays(start, 1) };
-  if (key === 'week') return { start, end: addDays(start, 7) };
-  if (key === 'month') return { start, end: endOfMonth(start) };
-  if (key === 'm6') return { start, end: addMonths(start, 6) };
-  if (key === 'year') return { start, end: new Date(start.getFullYear(), 11, 31, 23, 59, 59, 999) };
+  if (key === 'today') return { start, end: addDays(start, 1) }; // fin EXCLUSIVO
+  if (key === 'week') return { start, end: addDays(start, 7) };  // fin EXCLUSIVO
+  if (key === 'month') return { start, end: endOfMonth(start) }; // fin INCLUSIVO
+  if (key === 'm6') return { start, end: addMonths(start, 6) };  // fin EXCLUSIVO
+  if (key === 'year') return { start, end: new Date(start.getFullYear(), 11, 31, 23, 59, 59, 999) }; // inclusivo
   return { start: null, end: null }; // all
 };
 
+// Usa fin EXCLUSIVO cuando el fin es “día siguiente 00:00”
 const inRange = (date, range) => {
   if (!date) return false;
   if (!range.start || !range.end) return true;
-  return date >= range.start && date <= range.end;
+  return date >= range.start && date < range.end;
 };
 
 /* =========================
@@ -112,19 +113,15 @@ const aggregate = (items = [], rangeKey = 'week') => {
   const rng = computeRange(rangeKey);
   const today = todayStart();
 
-  // Estructuras POR RANGO (para totales superiores y top responsables)
   const rangeAgg = {
     tareas: {
       total: 0,
       porPrioridad: { alta: 0, media: 0, baja: 0 },
-      responsables: {}, // name -> count (solo tareas, dentro del periodo)
+      responsables: {},
     },
-    pagos: {
-      totalMonto: 0,
-    },
+    pagos: { totalMonto: 0 },
   };
 
-  // Buckets GLOBAL (independientes del selector)
   const globalTaskBuckets = {
     vencidas: 0,
     hoy: 0,
@@ -135,21 +132,11 @@ const aggregate = (items = [], rangeKey = 'week') => {
     sinFecha: 0,
   };
 
-  const globalPayBuckets = {
-    semana: 0,
-    mes: 0,
-    m6: 0,
-    anio: 0,
-  };
-
+  const globalPayBuckets = { semana: 0, mes: 0, m6: 0, anio: 0 };
   const vencidosGlobal = { tareas: 0, pagosCount: 0, pagosMonto: 0 };
+  const overdueByOwner = {};
+  const porProveedorMap = {};
 
-  // Vencidas por responsable (GLOBAL respecto a hoy; útil para ver riesgo)
-  const overdueByOwner = {}; // name -> count
-
-  const porProveedorMap = {}; // global (pagos por proveedor)
-
-  // Helpers de bucket global
   const pushTaskGlobal = (d) => {
     if (!d) { globalTaskBuckets.sinFecha += 1; return; }
     if (d < today) { globalTaskBuckets.vencidas += 1; return; }
@@ -169,11 +156,10 @@ const aggregate = (items = [], rangeKey = 'week') => {
     if (d.getFullYear() === today.getFullYear() && d >= today) globalPayBuckets.anio += a;
   };
 
-  // Recorrido principal
   for (const it of items) {
     const due = asLocalDay(it.due);
 
-    // POR RANGO (para totales superiores y top)
+    // Totales por rango
     if (due ? inRange(due, rng) : rangeKey === 'all') {
       if (it.kind === 'task') {
         rangeAgg.tareas.total += 1;
@@ -184,13 +170,12 @@ const aggregate = (items = [], rangeKey = 'week') => {
         const owner = it.owner || 'Sin responsable';
         rangeAgg.tareas.responsables[owner] = (rangeAgg.tareas.responsables[owner] || 0) + 1;
       }
-
       if (it.kind === 'payment') {
         rangeAgg.pagos.totalMonto += Number(it.amount || 0);
       }
     }
 
-    // GLOBAL (siempre)
+    // Buckets globales
     if (it.kind === 'task') {
       pushTaskGlobal(due);
       if (due && due < today) {
@@ -199,11 +184,9 @@ const aggregate = (items = [], rangeKey = 'week') => {
         overdueByOwner[owner] = (overdueByOwner[owner] || 0) + 1;
       }
     }
-
     if (it.kind === 'payment') {
       const amt = Number(it.amount || 0);
       pushPayGlobal(due, amt);
-
       if (due && due < today) {
         vencidosGlobal.pagosCount += 1;
         vencidosGlobal.pagosMonto += amt;
@@ -225,7 +208,7 @@ const aggregate = (items = [], rangeKey = 'week') => {
     globalPayBuckets,
     vencidosGlobal,
     porProveedor,
-    overdueByOwner, // para mostrar vencidas por responsable
+    overdueByOwner,
   };
 };
 
