@@ -231,7 +231,7 @@ const PlannerDashboard = () => {
       <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
         {/* Barra superior */}
         <div className="flex items-center gap-3 mb-4">
-          <Button variant="ghost" onClick={() => navigate(-1)} className="text-white hover:bg-white/10">
+          <Button variant="ghost" onClick={() => navigate(`/host/${eventId}`)} className="text-white hover:bg-white/10">
             <ArrowLeft className="w-4 h-4" />
           </Button>
           <h1 className="text-2xl font-bold text-white">Planner</h1>

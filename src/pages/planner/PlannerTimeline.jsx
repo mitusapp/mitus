@@ -352,7 +352,7 @@ const PlannerTimeline = () => {
           <div className="flex items-center">
             <Button
               variant="ghost"
-              onClick={() => navigate(-1)}
+              onClick={() => navigate(`/host/${eventId}/planner`)}
               className="text-white hover:bg-white/10 mr-3"
             >
               <ArrowLeft className="w-4 h-4" />
