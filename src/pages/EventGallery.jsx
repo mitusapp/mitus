@@ -92,6 +92,78 @@ const EventGallery = () => {
   const lastActiveElRef = useRef(null);
   const closeBtnRef = useRef(null);
 
+  // === GRID MASONRY: contenedor y funciones de layout ===
+  const gridWrapperRef = useRef(null);
+
+  const relayoutCard = useCallback((cardEl) => {
+    // Usar el grid .grid-masonry más cercano (soporta múltiples grids)
+    const gridEl = cardEl?.closest?.('.grid-masonry');
+    if (!gridEl) return;
+
+    const styles = window.getComputedStyle(gridEl);
+    const rowGap = parseFloat(styles.rowGap);
+    const rowHeight = parseFloat(styles.gridAutoRows);
+
+    const mediaEl = cardEl.querySelector('[data-media]');
+    if (!mediaEl) return;
+
+    const cardWidth = cardEl.clientWidth;
+
+    // Preferir dimensiones intrínsecas proporcionadas (data-w/h)
+    const dw = parseFloat(mediaEl.getAttribute('data-w'));
+    const dh = parseFloat(mediaEl.getAttribute('data-h'));
+    let height = 0;
+    if (dw > 0 && dh > 0) {
+      height = (cardWidth * dh) / dw;
+    } else if (mediaEl.tagName === 'IMG' && mediaEl.naturalWidth && mediaEl.naturalHeight) {
+      height = (cardWidth * mediaEl.naturalHeight) / mediaEl.naturalWidth;
+    } else if (mediaEl.tagName === 'VIDEO' && mediaEl.videoWidth && mediaEl.videoHeight) {
+      height = (cardWidth * mediaEl.videoHeight) / mediaEl.videoWidth;
+    } else {
+      // Fallback post-layout
+      height = mediaEl.offsetHeight || Math.ceil(mediaEl.getBoundingClientRect().height);
+    }
+
+    const span = Math.ceil((Math.ceil(height) + rowGap) / (rowHeight + rowGap));
+    cardEl.style.gridRowEnd = `span ${span}`;
+  }, []);
+
+  const relayoutAll = useCallback(() => {
+    const root = gridWrapperRef.current;
+    if (!root) return;
+    const cards = root.querySelectorAll('.grid-item');
+    cards.forEach((c) => relayoutCard(c));
+  }, [relayoutCard]);
+
+  useEffect(() => {
+    if (!gridWrapperRef.current) return;
+    const ro = new ResizeObserver(() => {
+      // Recalcular spans si cambia el ancho (número de columnas)
+      relayoutAll();
+    });
+    ro.observe(gridWrapperRef.current);
+    window.addEventListener('load', relayoutAll);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('load', relayoutAll);
+    };
+  }, [relayoutAll]);
+
+  const onImageReady = useCallback((mediaEl) => {
+    const run = async () => {
+      try {
+        if (mediaEl?.tagName === 'IMG' && 'decode' in mediaEl) {
+          await mediaEl.decode();
+        }
+      } catch {}
+      if (!mediaEl) return;
+      const card = mediaEl.closest?.('.grid-item');
+      if (!card) return;
+      requestAnimationFrame(() => requestAnimationFrame(() => relayoutCard(card)));
+    };
+    run();
+  }, [relayoutCard]);
+
   const fetchEventData = useCallback(async () => {
     setLoading(true);
     try {
@@ -131,26 +203,32 @@ const EventGallery = () => {
 
   useEffect(() => { fetchEventData(); }, [fetchEventData]);
 
-  // Ordenación total: por categoría (orden fijo), luego por uploaded_at, y por id como respaldo
+  // === ORDEN GLOBAL: categoría (orden fijo) y luego nombre de archivo (natural A→Z) ===
   const sortedUploads = useMemo(() => {
     const orderIndex = (cat) => {
       const i = CATEGORY_ORDER.indexOf(cat);
-      if (i !== -1) return i; // categorías conocidas en orden
-      if (cat === DEFAULT_CATEGORY) return 10_000; // al final
-      return 9_000 + cat.localeCompare('zzzz', 'es'); // extras antes de "Más momentos"
+      if (i !== -1) return i;
+      if (cat === DEFAULT_CATEGORY) return 10_000;
+      return 9_000 + cat.localeCompare('zzzz', 'es');
     };
-    const toTime = (u) => {
-      const t = u.uploaded_at || u.created_at || null;
-      return t ? new Date(t).getTime() : 0;
-    };
+    const nameOf = (u) =>
+      (u.file_name || u.title || (u.file_url?.split('/')?.pop()?.split('?')[0]) || '')
+        .toLocaleLowerCase('es');
+
     return [...uploads].sort((a, b) => {
       const ca = orderIndex(a._cat), cb = orderIndex(b._cat);
       if (ca !== cb) return ca - cb;
-      const ta = toTime(a), tb = toTime(b);
-      if (ta !== tb) return ta - tb;
+      const n = nameOf(a).localeCompare(nameOf(b), 'es', { numeric: true, sensitivity: 'base' });
+      if (n !== 0) return n;
       return String(a.id).localeCompare(String(b.id));
     });
   }, [uploads]);
+
+  // Re-layout cuando cambie el dataset
+  useEffect(() => {
+    const t = setTimeout(relayoutAll, 0);
+    return () => clearTimeout(t);
+  }, [sortedUploads, relayoutAll]);
 
   // Selección de portada mejorada por orientación (no bloqueante)
   const pickCoverAsync = useCallback(async (allUploads) => {
@@ -198,12 +276,18 @@ const EventGallery = () => {
 
   const categories = useOrderedCategories(sortedUploads);
 
+  // Mapa auxiliar: id -> índice en el arreglo global (para abrir visor correctamente)
+  const indexById = useMemo(() => {
+    const m = {};
+    sortedUploads.forEach((u, i) => { m[u.id] = i; });
+    return m;
+  }, [sortedUploads]);
+
   // Actualiza categoría activa según scroll (intersección de anclas)
   useEffect(() => {
     const anchors = categories.map(c => anchorRefs.current[slug(c)]).filter(Boolean);
     if (!anchors.length) return;
     const io = new IntersectionObserver(entries => {
-      // el primer anchor que cruza el viewport
       const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
       if (visible[0]) {
         const id = visible[0].target.getAttribute('data-cat');
@@ -305,11 +389,15 @@ const EventGallery = () => {
           @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@600;700&family=Lato:wght@300;400;500&display=swap');
           .font-raleway{font-family:'Raleway',sans-serif;}
           .font-lato{font-family:'Lato',sans-serif;}
-          .masonry { column-count: 2; column-gap: 8px; }
-          .masonry-item { break-inside: avoid; margin-bottom: 8px; }
-          @media (min-width: 1024px) { .masonry { column-count: 4; column-gap: 12px; } .masonry-item { margin-bottom: 12px; } }
 
-          /* Altura exacta de pantalla para móviles: usar dvh/svh con fallback a vh */
+          /* === Masonry por filas con CSS Grid === */
+          .grid-masonry { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; grid-auto-rows: 1px; grid-auto-flow: row; }
+          .grid-item { position: relative; box-sizing: border-box; }
+          .grid-masonry img,
+          .grid-masonry video { display: block; width: 100%; height: 100%; vertical-align: bottom; }
+          @media (min-width: 1024px) { .grid-masonry { grid-template-columns: repeat(4, 1fr); gap: 6px; grid-auto-rows: 1px; } }
+
+          /* Altura exacta de pantalla */
           .hero-grid { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; height: 100vh; }
           @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
           @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
@@ -323,7 +411,6 @@ const EventGallery = () => {
           .initials-circle span{ font-family: 'Lato', sans-serif; font-weight: 800; font-size: clamp(28px, 6vw, 48px); color: #fff; letter-spacing: .04em; white-space: nowrap; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
           .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
 
-          /* Micro-animación del chevron */
           @keyframes nudge { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(4px); opacity: 1; } 100% { transform: translateY(0); opacity: .9; } }
           .chevron-anim { animation: nudge 1.6s ease-in-out infinite; }
         `}
@@ -431,61 +518,78 @@ const EventGallery = () => {
 
       <div id="gallery-start" />
       <main>
-        <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10">
-          {/* Masonry de TODOS los uploads, ordenados por categoría y fecha */}
-          <div className="masonry">
-            {sortedUploads.map((upload, idx) => {
-              const cat = normalizeCategory(upload);
-              const id = slug(cat);
-              const isFirstOfCat = idx === 0 || normalizeCategory(sortedUploads[idx - 1]) !== cat;
-              const mediaUrl = upload.type === 'video' ? upload.file_url : (upload.web_url || upload.file_url);
+        <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10" ref={gridWrapperRef}>
+          {/* Grid ÚNICO: todos los archivos dentro para continuidad del gap */}
+          <div className="grid-masonry">
+            {(() => {
+              // Deduplicar solo fotos por clave base; videos siempre pasan
+              const baseKey = (u) => {
+                const raw = (u.file_name || u.web_url || u.file_url || '').toLowerCase();
+                const last = raw.split('/').pop().split('?')[0];        // nombre.ext
+                const stem = last.replace(/\.[a-z0-9]+$/i, '');         // nombre sin extensión
+                return stem
+                  .replace(/@(?:2|3)x|-\d{2,4}w|-\d{2,4}h|_\d{2,4}x\d{2,4}/g, '')
+                  .replace(/(?:^|[_-])(web|webp|mobile|thumb|sm|md|lg|xl|orig(?:inal)?|full|hires)(?:[_-]\d+)?$/,'');
+              };
+              const seen = new Set();
+              const displayItems = sortedUploads
+                .filter(u => u.type === 'video' || !!u.web_url)
+                .filter(u => {
+                  if (u.type === 'video') return true;
+                  const k = baseKey(u);
+                  if (seen.has(k)) return false;
+                  seen.add(k);
+                  return true;
+                });
 
-              return (
-                <motion.div
-                  key={upload.id}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ duration: 0.35 }}
-                  className="masonry-item cursor-pointer relative"
-                  onClick={() => {
-                    lastActiveElRef.current = document.activeElement;
-                    setSelectedMediaIndex(idx);
-                  }}
-                  title={upload.title || ''}
-                >
-                  {/* Ancla invisible para navegación por categoría */}
-                  {isFirstOfCat && (
-                    <div
-                      ref={(el) => { if (el) anchorRefs.current[id] = el; }}
-                      data-cat={cat}
-                      id={`cat-${id}`}
-                      className="absolute -top-24"
-                      aria-hidden
-                    />
-                  )}
+              return displayItems.map((upload) => {
+                const isVideo = upload.type === 'video';
+                const mediaUrl = isVideo ? upload.file_url : upload.web_url; // SOLO web para fotos
 
-                  {upload.type === 'video'
-                    ? (
+                return (
+                  <motion.div
+                    key={upload.id}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.35 }}
+                    className="grid-item cursor-pointer relative"
+                    onClick={() => {
+                      lastActiveElRef.current = document.activeElement;
+                      setSelectedMediaIndex(indexById[upload.id]); // visor como el original
+                    }}
+                    title={upload.title || ''}
+                  >
+                    {isVideo ? (
                       <div className="relative bg-black">
-                        <video src={mediaUrl} className="w-full h-auto" playsInline muted />
+                        <video
+                          src={mediaUrl}
+                          className="w-full h-auto"
+                          playsInline
+                          muted
+                          data-media
+                          onLoadedMetadata={(e) => onImageReady(e.currentTarget)}
+                        />
                         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                           <VideoIcon className="w-10 h-10 text-white/90" />
                         </div>
                       </div>
-                    )
-                    : (
+                    ) : (
                       <img
                         src={mediaUrl}
                         alt={upload.title || 'Foto del evento'}
                         className="w-full h-auto select-none"
                         loading="lazy"
                         decoding="async"
+                        data-media
+                        onLoad={(e) => onImageReady(e.currentTarget)}
                       />
                     )}
-                </motion.div>
-              );
-            })}
+                  </motion.div>
+                );
+              });
+            })()}
           </div>
+
           {sortedUploads.length === 0 && (
             <div className="text-center py-20">
               <ImageIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
@@ -509,7 +613,6 @@ const EventGallery = () => {
             onClose={() => {
               setSelectedMediaIndex(null);
               setIsSlideshow(false);
-              // devolver foco
               if (lastActiveElRef.current && lastActiveElRef.current.focus) {
                 try { lastActiveElRef.current.focus(); } catch {}
               }
@@ -594,7 +697,6 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
       else if (e.key === ' ') { e.preventDefault(); setIsPlaying(p => !p); setIsSlideshow(true); }
     };
     window.addEventListener('keydown', onKey);
-    // Foco en el botón de cerrar al abrir
     closeBtnRef?.current?.focus?.();
     return () => window.removeEventListener('keydown', onKey);
   }, [goToNext, goToPrev, onClose, setIsSlideshow, closeBtnRef]);

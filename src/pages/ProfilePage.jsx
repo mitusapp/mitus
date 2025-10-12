@@ -1,7 +1,7 @@
 // src/pages/ProfilePage.jsx
 import React, { useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Calendar,
   Percent,
@@ -79,6 +79,7 @@ const daysUntil = (dateStr) => {
 const ProfilePage = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const queryClient = useQueryClient();
   const { isDevHelperVisible, setIsDevHelperVisible } = useDevHelper();
 
@@ -164,6 +165,15 @@ const ProfilePage = () => {
     window.addEventListener('events:changed', onEventsChanged);
     return () => window.removeEventListener('events:changed', onEventsChanged);
   }, [queryClient, user?.id]);
+
+  // ✅ Al navegar desde el Wizard con state.refreshEvents, forzar refetch inmediato
+  useEffect(() => {
+    if (location.state?.refreshEvents) {
+      queryClient.invalidateQueries({ queryKey: ['events', user?.id] });
+      // limpiar el state para evitar refetches no deseados al volver atrás
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location.state?.refreshEvents, queryClient, user?.id, navigate, location.pathname]);
 
   // === Derivados y UI ===
   const events = useMemo(() => {

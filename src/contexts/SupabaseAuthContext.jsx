@@ -98,15 +98,24 @@ export const AuthProvider = ({ children }) => {
         description: error.message || 'Intenta de nuevo.',
       });
     } else {
-      toast({
-        title: 'Confirma tu correo',
-        description: 'Te enviamos un enlace para activar tu cuenta.',
-      });
-      navigate('/signup-confirm', { replace: true });
+      // ⚠️ Cambio mínimo: eliminar pantalla de confirmación y entrar directo
+      const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInError) {
+        // Fallback si el proyecto exige confirmación a nivel servidor
+        toast({
+          title: 'Cuenta creada',
+          description: 'Inicia sesión con tu correo y contraseña.',
+        });
+        navigate('/login', { replace: true });
+      } else {
+        // Establecer sesión local y redirigir al Profile
+        if (signInData?.session) handleSessionChange(signInData.session);
+        navigate('/profile', { replace: true });
+      }
     }
     setLoading(false);
     return { data, error };
-  }, [toast, navigate]);
+  }, [toast, navigate, handleSessionChange]);
 
   const signIn = useCallback(async (email, password) => {
     setLoading(true);

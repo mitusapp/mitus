@@ -1,11 +1,11 @@
 /* eslint-disable react/no-unknown-property */
 // src/pages/InvitationWizard.jsx (ACTUALIZADO)
-// Cambios clave:
-// - Mantiene el flujo de pasos pero compatible con steps que exporten { Component } o { component }.
-// - Añade eventCountry (CO), eventCity (""), eventCurrency (COP) al estado y a Supabase.
-// - Corrige manejo de fecha/hora como cadenas (sin new Date('YYYY-MM-DD')).
-// - Carga en modo edición también event_country, event_city, event_currency.
-// - Persiste formData en localStorage y la portada en sessionStorage.
+// Cambios clave (mínimos y sin tocar UI):
+// - El paso de portada ahora pasa el File original (setImageFile) y preview con objectURL (no base64).
+// - Al guardar: sube ORIGINAL a Storage (event-covers/<eventId>/orig/...).
+// - Genera versión WEB optimizada (WebP ~1800px) y la sube a event-covers/<eventId>/web/...
+// - Guarda la URL **WEB** en events.cover_image_url (todas las vistas seguirán funcionando igual pero más rápido).
+// - (Opcional) Deja original accesible para usos futuros (sin alterar el UI ni flujos).
 
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -31,6 +31,29 @@ const normalizeHosts = (val) => {
     .map((h) => h.trim())
     .filter(Boolean);
 };
+
+// Compresión simple a WebP (~1800px) para portada (igual criterio que la galería)
+async function compressImageToWeb(file, { maxDim = 1800, quality = 0.82, type = 'image/webp' } = {}) {
+  const loadInput = async (f) => {
+    try { return await createImageBitmap(f); } catch {
+      const url = URL.createObjectURL(f);
+      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+      try { URL.revokeObjectURL(url); } catch {}
+      return img;
+    }
+  };
+  const bmp = await loadInput(file);
+  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const can = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, h) : (() => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; })();
+  const ctx = can.getContext('2d');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  const blob = (can.convertToBlob)
+    ? await can.convertToBlob({ type, quality })
+    : await new Promise((res) => can.toBlob(res, type, quality));
+  return { blob, w, h };
+}
 
 // ---------------------------- Componente ----------------------------------
 const initialData = {
@@ -115,6 +138,9 @@ function InvitationWizard() {
       return '';
     }
   });
+
+  // NUEVO: mantener el File original para subir
+  const [imageFile, setImageFile] = useState(null);
 
   // Extra: estado de guardado
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -219,23 +245,63 @@ function InvitationWizard() {
     try {
       const eventId = isUpdate ? editingEventId : shortEventId();
 
-      // Subida de imagen si es base64/Blob
+      // Subida de portada (ORIGINAL + WEB optimizada)
       let cover_image_url = imagePreview && imagePreview.startsWith('https://') ? imagePreview : null;
 
-      if (imagePreview && !imagePreview.startsWith('https://')) {
-        const response = await fetch(imagePreview);
-        const blob = await response.blob();
-        const fileExt = blob.type.split('/')[1] || 'png';
-        const fileName = `${Date.now()}.${fileExt}`;
-        const filePath = `public/${eventId}/${fileName}`;
+      if (imageFile) {
+        const now = new Date();
+        const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
+        const rand = Math.random().toString(36).slice(2, 8);
+        const safeName = (imageFile.name || `cover_${stamp}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const ext = (imageFile.type.split('/')[1] || safeName.split('.').pop() || 'png').toLowerCase();
 
-        const { error: uploadError } = await supabase.storage
+        // 1) Subir ORIGINAL
+        const origPath = `${eventId}/orig/${stamp}_${rand}_${safeName}`;
+        const { error: upOrigErr } = await supabase.storage
           .from('event-covers')
-          .upload(filePath, blob, { upsert: true });
-        if (uploadError) throw uploadError;
+          .upload(origPath, imageFile, { contentType: imageFile.type, cacheControl: '3600', upsert: false });
+        if (upOrigErr) throw upOrigErr;
+        const { data: origUrlData } = supabase.storage.from('event-covers').getPublicUrl(origPath);
 
-        const { data: urlData } = supabase.storage.from('event-covers').getPublicUrl(filePath);
-        cover_image_url = urlData.publicUrl;
+        // 2) Generar y subir WEB optimizada (WebP ~1800px)
+        let webUrl = origUrlData.publicUrl;
+        try {
+          const { blob: webBlob } = await compressImageToWeb(imageFile, { maxDim: 1800, quality: 0.82, type: 'image/webp' });
+          const webSafe = safeName.replace(/\.[^.]+$/, '') + '.webp';
+          const webPath = `${eventId}/web/${stamp}_${rand}_${webSafe}`;
+          const { error: upWebErr } = await supabase.storage
+            .from('event-covers')
+            .upload(webPath, webBlob, { contentType: 'image/webp', cacheControl: '3600', upsert: false });
+          if (!upWebErr) {
+            const { data: webUrlData } = supabase.storage.from('event-covers').getPublicUrl(webPath);
+            webUrl = webUrlData.publicUrl;
+          }
+        } catch (e) {
+          console.warn('Fallo al optimizar portada; usando original como cover_image_url', e);
+        }
+
+        cover_image_url = webUrl; // usar siempre la versión web en el UI
+
+        // (Opcional) Guardar referencia al original dentro de invitation_details sin romper nada
+        // Se añadirá más abajo al armar eventData
+        formData.__cover_original_url = origUrlData.publicUrl;
+      } else if (imagePreview && !imagePreview.startsWith('https://')) {
+        // Fallback para compatibilidad: si alguien dejó una dataURL previa (casos antiguos)
+        try {
+          const response = await fetch(imagePreview);
+          const blob = await response.blob();
+          const fileExt = blob.type.split('/')[1] || 'png';
+          const fileName = `${Date.now()}.${fileExt}`;
+          const filePath = `public/${eventId}/${fileName}`;
+          const { error: uploadError } = await supabase.storage
+            .from('event-covers')
+            .upload(filePath, blob, { upsert: true });
+          if (uploadError) throw uploadError;
+          const { data: urlData } = supabase.storage.from('event-covers').getPublicUrl(filePath);
+          cover_image_url = urlData.publicUrl;
+        } catch (e) {
+          console.warn('Fallback base64 → blob falló:', e);
+        }
       }
 
       // Ensamblar payload
@@ -257,6 +323,8 @@ function InvitationWizard() {
           indications: formData.indications,
           template: formData.template,
           countdown: true,
+          // Guardar referencia al original (no usada por el UI actual)
+          cover_original_url: formData.__cover_original_url || undefined,
         },
       };
 
@@ -304,7 +372,13 @@ function InvitationWizard() {
   const finishWizard = async () => {
     const isUpdate = Boolean(editingEventId);
     const id = await saveEvent(isUpdate);
-    if (id) navigate(`/host/${id}`);
+    if (!id) return;
+    // Creación → /profile con bandera de refresh; Edición → /host/:id (sin dejar wizard en el historial)
+    if (isUpdate) {
+      navigate(`/host/${id}`, { replace: true });
+    } else {
+      navigate('/profile', { replace: true, state: { refreshEvents: true } });
+    }
   };
 
   // Render
@@ -362,7 +436,13 @@ function InvitationWizard() {
               transition={{ duration: 0.2 }}
             >
               {ActiveStep ? (
-                <ActiveStep formData={formData} setFormData={setFormData} imagePreview={imagePreview} setImagePreview={setImagePreview} />
+                <ActiveStep
+                  formData={formData}
+                  setFormData={setFormData}
+                  imagePreview={imagePreview}
+                  setImagePreview={setImagePreview}
+                  setImageFile={setImageFile}
+                />
               ) : null}
             </motion.div>
           </AnimatePresence>

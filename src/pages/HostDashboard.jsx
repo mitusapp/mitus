@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, User as UserIcon, ArrowLeft, Calendar } from 'lucide-react';
+import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, User as UserIcon, ArrowLeft, Calendar, Edit3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -19,13 +19,13 @@ const EVENT_TYPE_LABELS = {
   aniversario: 'Aniversario',
   otro: 'Otro Evento',
 };
-const startOfDay = (d) => { const nd = new Date(d); nd.setHours(0,0,0,0); return nd; };
-const daysUntil = (dateStr) => { if(!dateStr) return null; const today = startOfDay(new Date()); const eventDate = startOfDay(new Date(String(dateStr).replace(/-/g,'/'))); return Math.floor((eventDate - today) / 86400000); };
+const startOfDay = (d) => { const nd = new Date(d); nd.setHours(0, 0, 0, 0); return nd; };
+const daysUntil = (dateStr) => { if (!dateStr) return null; const today = startOfDay(new Date()); const eventDate = startOfDay(new Date(String(dateStr).replace(/-/g, '/'))); return Math.floor((eventDate - today) / 86400000); };
 const formatLongEsDate = (d) => {
   if (!d) return '';
   const date = new Date(String(d).replace(/-/g, '/'));
   if (isNaN(date.getTime())) return '';
-  return date.toLocaleDateString('es-ES', { year:'numeric', month:'long', day:'numeric' });
+  return date.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
 };
 const getInitials = (name) => {
   if (!name) return '?';
@@ -178,7 +178,11 @@ const HostDashboard = () => {
         {/* Header (con back a la izquierda, mantiene títulos, quita "Salir") */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-start gap-3">
-            <Button variant="ghost" onClick={() => navigate(-1)} className="text-[#2D2D2D] hover:bg-[#F5F5F5]">
+            <Button
+              variant="ghost"
+              onClick={() => navigate('/profile', { state: { refreshEvents: true } })}
+              className="text-[#2D2D2D] hover:bg-[#F5F5F5]"
+            >
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
@@ -187,8 +191,13 @@ const HostDashboard = () => {
             </div>
           </div>
           <div className="flex gap-2">
+            {/* NUEVO: Editar (solo ícono) */}
+            <Button variant="outline" onClick={() => navigate(`/wizard?edit=${eventId}`)} className="border-[#E6E3E0] text-[#2D2D2D] hover:bg-[#F8F8F8]" aria-label="Editar">
+              <Edit3 className="w-4 h-4" />
+            </Button>
+            {/* Configuración existente */}
             <Button variant="outline" onClick={() => navigate(`/host/${eventId}/settings`)} className="border-[#E6E3E0] text-[#2D2D2D] hover:bg-[#F8F8F8]">
-              <Settings className="w-4 h-4"/>
+              <Settings className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -238,7 +247,7 @@ const HostDashboard = () => {
 
         {/* Centro de mando del Planner – ahora sin duplicar todos los módulos */}
         <div className="bg-white rounded-2xl p-6 border border-[#E6E3E0] mb-8 shadow-sm">
-          <h2 className="text-2xl font-bold text-[#2D2D2D] mb-4 flex items-center"><ClipboardCheck className="w-6 h-6 mr-3 text-[#B9A7F9]"/>Centro de Mando del Planner</h2>
+          <h2 className="text-2xl font-bold text-[#2D2D2D] mb-4 flex items-center"><ClipboardCheck className="w-6 h-6 mr-3 text-[#B9A7F9]" />Centro de Mando del Planner</h2>
 
           <div className="grid gap-4">
             {/* Resumen compacto */}
@@ -301,17 +310,17 @@ const HostDashboard = () => {
           </ActionCard>
 
           <ActionCard icon={<Eye />} title="Galería">
-          {/* QR y enlace principal: LANDING DE SUBIDA */}
-          <Button onClick={() => downloadQR(uploadLink, 'upload-qr.png', 'gallery')} className="w-full mb-2">
-            <Download className="w-4 h-4 mr-2" />Descargar QR
-          </Button>
-          <Button onClick={() => copyLink(uploadLink)} variant="outline" className="w-full border-[#E6E3E0]">
-            <Copy className="w-4 h-4 mr-2" />Copiar enlace
-          </Button>
-          {/* Enlaces visibles */}
-          <LinkRow label="Página para subir fotos" link={uploadLink} />
-          <LinkRow label="Ver galería" link={galleryLink} />
-        </ActionCard>
+            {/* QR y enlace principal: LANDING DE SUBIDA */}
+            <Button onClick={() => downloadQR(uploadLink, 'upload-qr.png', 'gallery')} className="w-full mb-2">
+              <Download className="w-4 h-4 mr-2" />Descargar QR
+            </Button>
+            <Button onClick={() => copyLink(uploadLink)} variant="outline" className="w-full border-[#E6E3E0]">
+              <Copy className="w-4 h-4 mr-2" />Copiar enlace
+            </Button>
+            {/* Enlaces visibles */}
+            <LinkRow label="Página para subir fotos" link={uploadLink} />
+            <LinkRow label="Ver galería" link={galleryLink} />
+          </ActionCard>
 
           <ActionCard icon={<Users />} title="Mesas">
             <Button onClick={() => downloadQR(tablesLink, 'tables-qr.png', 'tables')} className="w-full mb-2"><Download className="w-4 h-4 mr-2" />Descargar QR</Button>
