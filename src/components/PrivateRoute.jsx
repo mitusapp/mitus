@@ -13,11 +13,11 @@ const PrivateRoute = ({ children }) => {
   // Mientras se valida la sesión inicial, no decidir (evita loops/parpadeos)
   if (loading) return <LoadingSpinner />;
 
-  // Si NO hay usuario autenticado, guarda el destino y redirige al Home
+  // Si NO hay usuario autenticado, guarda el destino y redirige al Login
   if (!user) {
     const target = location.pathname + location.search + location.hash;
     try { sessionStorage.setItem('postLoginRedirect', target); } catch {}
-    return <Navigate to="/" replace state={{ from: location }} />;
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
   // Hay usuario -> permite acceder a la ruta privada

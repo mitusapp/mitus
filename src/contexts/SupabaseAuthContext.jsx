@@ -70,6 +70,16 @@ export const AuthProvider = ({ children }) => {
       // ✅ Si hay una ruta pendiente, úsala también en TOKEN_REFRESHED / USER_UPDATED
       const eventsThatRestore = ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'];
       if (newSession && eventsThatRestore.includes(event)) {
+        // ⬇️ NUEVO: si venimos de un cierre forzado, priorizar /profile e ignorar redirects previos
+        try {
+          const forceFlag = sessionStorage.getItem('forceNextLoginToProfile');
+          if (forceFlag) {
+            sessionStorage.removeItem('forceNextLoginToProfile');
+            navigate('/profile', { replace: true });
+            return;
+          }
+        } catch {}
+
         try {
           const pending = sessionStorage.getItem('postLoginRedirect');
           if (pending) {
@@ -92,6 +102,11 @@ export const AuthProvider = ({ children }) => {
 
       // Si el SDK emite SIGNED_OUT (p.ej., revocación global), ir a Home si estás en ruta privada
       if (event === 'SIGNED_OUT') {
+        // ⬇️ NUEVO: marcar que el próximo login debe ir a /profile e invalidar redirect pendiente
+        try {
+          sessionStorage.setItem('forceNextLoginToProfile', '1');
+          sessionStorage.removeItem('postLoginRedirect');
+        } catch {}
         const path = location.pathname;
         if (!PUBLIC_PATHS.has(path)) {
           navigate('/', { replace: true });
@@ -151,17 +166,27 @@ export const AuthProvider = ({ children }) => {
 
     if (data?.session) {
       handleSessionChange(data.session);
-      // 🔁 Prioridad: postLoginRedirect -> lastVisitedPath -> /profile
+      // 🔁 Prioridad (ajustada):
+      //  1) Si hay forceNextLoginToProfile -> /profile
+      //  2) postLoginRedirect
+      //  3) lastVisitedPath
+      //  4) /profile
       let next = '/profile';
       try {
-        const pending = sessionStorage.getItem('postLoginRedirect');
-        if (pending) {
-          sessionStorage.removeItem('postLoginRedirect');
-          next = pending;
+        const forceFlag = sessionStorage.getItem('forceNextLoginToProfile');
+        if (forceFlag) {
+          sessionStorage.removeItem('forceNextLoginToProfile');
+          // next ya es '/profile'
         } else {
-          const last = sessionStorage.getItem('lastVisitedPath');
-          if (last && !PUBLIC_PATHS.has(new URL(last, window.location.origin).pathname)) {
-            next = last;
+          const pending = sessionStorage.getItem('postLoginRedirect');
+          if (pending) {
+            sessionStorage.removeItem('postLoginRedirect');
+            next = pending;
+          } else {
+            const last = sessionStorage.getItem('lastVisitedPath');
+            if (last && !PUBLIC_PATHS.has(new URL(last, window.location.origin).pathname)) {
+              next = last;
+            }
           }
         }
       } catch {}
@@ -214,6 +239,8 @@ export const AuthProvider = ({ children }) => {
       try {
         sessionStorage.removeItem('postLoginRedirect');
         sessionStorage.removeItem('lastVisitedPath');
+        // También limpiamos el flag por si se dispara desde este dispositivo
+        sessionStorage.removeItem('forceNextLoginToProfile');
       } catch {}
       handleSessionChange(null);
       navigate('/', { replace: true });
