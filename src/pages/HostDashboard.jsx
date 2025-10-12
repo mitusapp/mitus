@@ -181,7 +181,7 @@ const HostDashboard = () => {
             <Button
               variant="ghost"
               onClick={() => navigate('/profile', { state: { refreshEvents: true } })}
-              className="text-[#2D2D2D] hover:bg-[#F5F5F5]"
+              className="!text-[#6B5CC8] !bg-[#B9A7F9]/10 hover:!bg-[#B9A7F9]/20"
             >
               <ArrowLeft className="w-4 h-4" />
             </Button>
@@ -192,11 +192,20 @@ const HostDashboard = () => {
           </div>
           <div className="flex gap-2">
             {/* NUEVO: Editar (solo ícono) */}
-            <Button variant="outline" onClick={() => navigate(`/wizard?edit=${eventId}`)} className="border-[#E6E3E0] text-[#2D2D2D] hover:bg-[#F8F8F8]" aria-label="Editar">
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/wizard?edit=${eventId}`)}
+              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8]"
+              aria-label="Editar"
+            >
               <Edit3 className="w-4 h-4" />
             </Button>
-            {/* Configuración existente */}
-            <Button variant="outline" onClick={() => navigate(`/host/${eventId}/settings`)} className="border-[#E6E3E0] text-[#2D2D2D] hover:bg-[#F8F8F8]">
+
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/host/${eventId}/settings`)}
+              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8]"
+            >
               <Settings className="w-4 h-4" />
             </Button>
           </div>

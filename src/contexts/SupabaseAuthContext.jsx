@@ -39,16 +39,31 @@ export const AuthProvider = ({ children }) => {
     }
   }, [loading, user, location]);
 
-  // Restaurar sesión y escuchar cambios
+  // ✅ Bootstrap simple: validar REMOTO UNA sola vez al montar, sin listeners extras
   useEffect(() => {
     let mounted = true;
 
     (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!mounted) return;
-      handleSessionChange(session);
+      try {
+        setLoading(true);
+        // Lo que haya en storage (puede estar obsoleto)
+        const { data: { session: localSession } } = await supabase.auth.getSession();
+
+        // Validar contra servidor
+        const { data, error } = await supabase.auth.getUser();
+        if (!mounted) return;
+
+        if (error || !data?.user) {
+          handleSessionChange(null);
+        } else {
+          handleSessionChange(localSession ? { ...localSession, user: data.user } : { user: data.user });
+        }
+      } catch {
+        if (mounted) handleSessionChange(null);
+      }
     })();
 
+    // Escuchar cambios del SDK
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
       handleSessionChange(newSession);
 
@@ -74,13 +89,21 @@ export const AuthProvider = ({ children }) => {
       if (event === 'SIGNED_IN' && newSession) {
         navigate('/profile', { replace: true });
       }
+
+      // Si el SDK emite SIGNED_OUT (p.ej., revocación global), ir a Home si estás en ruta privada
+      if (event === 'SIGNED_OUT') {
+        const path = location.pathname;
+        if (!PUBLIC_PATHS.has(path)) {
+          navigate('/', { replace: true });
+        }
+      }
     });
 
     return () => {
       mounted = false;
       subscription?.unsubscribe();
     };
-  }, [handleSessionChange, navigate]);
+  }, [handleSessionChange, navigate, location.pathname]);
 
   // === Helpers de autenticación ===
   const signUp = useCallback(async (email, password, options) => {
@@ -98,17 +121,12 @@ export const AuthProvider = ({ children }) => {
         description: error.message || 'Intenta de nuevo.',
       });
     } else {
-      // ⚠️ Cambio mínimo: eliminar pantalla de confirmación y entrar directo
+      // Entrar directo (si el proyecto exige confirmación, caerá al fallback)
       const { error: signInError, data: signInData } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) {
-        // Fallback si el proyecto exige confirmación a nivel servidor
-        toast({
-          title: 'Cuenta creada',
-          description: 'Inicia sesión con tu correo y contraseña.',
-        });
+        toast({ title: 'Cuenta creada', description: 'Inicia sesión con tu correo y contraseña.' });
         navigate('/login', { replace: true });
       } else {
-        // Establecer sesión local y redirigir al Profile
         if (signInData?.session) handleSessionChange(signInData.session);
         navigate('/profile', { replace: true });
       }
@@ -177,20 +195,22 @@ export const AuthProvider = ({ children }) => {
   }, [toast]);
 
   /**
-   * Cerrar sesión robusto.
-   * Limpia storage y navega al Home.
+   * Cerrar sesión robusto (idempotente y sin 403 en consola).
    */
   const signOut = useCallback(async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signOut({ scope: 'global' });
-      if (error && error.code !== 'session_not_found') throw error;
-    } catch (e) {
-      const msg = String(e?.message || e?.msg || e || '');
-      if (!msg.includes('session_not_found')) console.error('Error al cerrar sesión:', e);
+      // ✅ Solo llamar a /logout si HAY sesión real
+      const { data, error } = await supabase.auth.getUser();
+      const hasRealSession = !error && !!data?.user;
+
+      if (hasRealSession) {
+        try { await supabase.auth.signOut({ scope: 'global' }); } catch {}
+        try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
+      }
+    } catch {
+      // silencioso
     } finally {
-      try { await supabase.auth.signOut({ scope: 'local' }); } catch {}
-      // 🧹 Limpia recordatorios de ruta
       try {
         sessionStorage.removeItem('postLoginRedirect');
         sessionStorage.removeItem('lastVisitedPath');

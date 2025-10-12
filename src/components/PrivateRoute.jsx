@@ -7,19 +7,20 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 // import LoadingSpinner from '@/components/ui/LoadingSpinner';
 
 const PrivateRoute = ({ children }) => {
-  const { session, loading } = useAuth();
+  const { user, loading } = useAuth(); // ✅ usamos `user` en lugar de `session`
   const location = useLocation();
 
+  // Mientras se valida la sesión inicial, no decidir (evita loops/parpadeos)
   if (loading) return <LoadingSpinner />;
 
-  if (!session) {
-    // Guarda la ruta a la que intentaba ir para redirigir tras login
+  // Si NO hay usuario autenticado, guarda el destino y redirige al Home
+  if (!user) {
     const target = location.pathname + location.search + location.hash;
     try { sessionStorage.setItem('postLoginRedirect', target); } catch {}
-    // ⬅️ Ahora redirige al HOME ("/") cuando no hay sesión
     return <Navigate to="/" replace state={{ from: location }} />;
   }
 
+  // Hay usuario -> permite acceder a la ruta privada
   return children;
 };
 

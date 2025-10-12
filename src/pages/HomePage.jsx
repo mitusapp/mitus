@@ -14,10 +14,10 @@ const HomePage = () => {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
 
-  // ✅ Si ya hay sesión, enviar al destino correcto:
+  // ✅ Redirige solo cuando ya terminó el bootstrap (loading=false) y hay user real.
   //    1) postLoginRedirect (si existe)
   //    2) lastVisitedPath (si existe y no es público)
-  //    3) /profile (comportamiento actual)
+  //    3) /profile
   useEffect(() => {
     if (!loading && user) {
       try {
@@ -30,7 +30,12 @@ const HomePage = () => {
         const last = sessionStorage.getItem('lastVisitedPath');
         if (last) {
           const path = new URL(last, window.location.origin).pathname;
-          const isPublic = path === '/' || path === '/login' || path === '/signup' || path === '/signup-confirm' || path === '/reset-password';
+          const isPublic =
+            path === '/' ||
+            path === '/login' ||
+            path === '/signup' ||
+            path === '/signup-confirm' ||
+            path === '/reset-password';
           if (!isPublic) {
             navigate(last, { replace: true });
             return;
@@ -51,46 +56,14 @@ const HomePage = () => {
   }
 
   const features = [
-    {
-      icon: <Calendar className="w-8 h-8" />,
-      title: "Crea tu evento",
-      description: "Define fecha, lugar, portada y detalles en minutos."
-    },
-    {
-      icon: <Users className="w-8 h-8" />,
-      title: "Invitados organizados",
-      description: "Administra lista, segmentos y notas en un solo lugar."
-    },
-    {
-      icon: <CheckCircle className="w-8 h-8" />,
-      title: "RSVP en tiempo real",
-      description: "Recibe confirmaciones y seguimiento instantáneo."
-    },
-    {
-      icon: <Table className="w-8 h-8" />,
-      title: "Mesas y asientos",
-      description: "Asigna lugares y visualiza el plano fácilmente."
-    },
-    {
-      icon: <QrCode className="w-8 h-8" />,
-      title: "QR del evento",
-      description: "Genera y descarga códigos para acceso, galería y acciones clave."
-    },
-    {
-      icon: <Home className="w-8 h-8" />,
-      title: "Landing del evento",
-      description: "Información central en un enlace listo para compartir."
-    },
-    {
-      icon: <Image className="w-8 h-8" />,
-      title: "Álbum digital con QR",
-      description: "Tus invitados suben fotos y videos escaneando un código."
-    },
-    {
-      icon: <MapPin className="w-8 h-8" />,
-      title: "Encuentra tu mesa",
-      description: "Escanea el QR y ubica tu asiento al instante."
-    }
+    { icon: <Calendar className="w-8 h-8" />, title: "Crea tu evento", description: "Define fecha, lugar, portada y detalles en minutos." },
+    { icon: <Users className="w-8 h-8" />, title: "Invitados organizados", description: "Administra lista, segmentos y notas en un solo lugar." },
+    { icon: <CheckCircle className="w-8 h-8" />, title: "RSVP en tiempo real", description: "Recibe confirmaciones y seguimiento instantáneo." },
+    { icon: <Table className="w-8 h-8" />, title: "Mesas y asientos", description: "Asigna lugares y visualiza el plano fácilmente." },
+    { icon: <QrCode className="w-8 h-8" />, title: "QR del evento", description: "Genera y descarga códigos para acceso, galería y acciones clave." },
+    { icon: <Home className="w-8 h-8" />, title: "Landing del evento", description: "Información central en un enlace listo para compartir." },
+    { icon: <Image className="w-8 h-8" />, title: "Álbum digital con QR", description: "Tus invitados suben fotos y videos escaneando un código." },
+    { icon: <MapPin className="w-8 h-8" />, title: "Encuentra tu mesa", description: "Escanea el QR y ubica tu asiento al instante." }
   ];
 
   return (
@@ -197,7 +170,16 @@ const HomePage = () => {
           </motion.div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-            {features.map((feature, index) => (
+            {[
+              { icon: <Calendar className="w-8 h-8" />, title: "Crea tu evento", description: "Define fecha, lugar, portada y detalles en minutos." },
+              { icon: <Users className="w-8 h-8" />, title: "Invitados organizados", description: "Administra lista, segmentos y notas en un solo lugar." },
+              { icon: <CheckCircle className="w-8 h-8" />, title: "RSVP en tiempo real", description: "Recibe confirmaciones y seguimiento instantáneo." },
+              { icon: <Table className="w-8 h-8" />, title: "Mesas y asientos", description: "Asigna lugares y visualiza el plano fácilmente." },
+              { icon: <QrCode className="w-8 h-8" />, title: "QR del evento", description: "Genera y descarga códigos para acceso, galería y acciones clave." },
+              { icon: <Home className="w-8 h-8" />, title: "Landing del evento", description: "Información central en un enlace listo para compartir." },
+              { icon: <Image className="w-8 h-8" />, title: "Álbum digital con QR", description: "Tus invitados suben fotos y videos escaneando un código." },
+              { icon: <MapPin className="w-8 h-8" />, title: "Encuentra tu mesa", description: "Escanea el QR y ubica tu asiento al instante." }
+            ].map((feature, index) => (
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 30 }}
@@ -237,7 +219,7 @@ const HomePage = () => {
             </p>
             <Button
               onClick={() => navigate('/wizard')}
-              className="bg-gradient-to-r from-[#E8A4B8] to-[#B9A7F9] hover:from-[#D48FA6] hover:to-[#A793F2] text-white px-10 py-4 text-xl rounded-xl shadow-xl transform hover:scale-105 transition-all duration-300"
+              className="bg-gradient-to-r from-[#E8A4B8] to-[#B9A7F9] hover:from-[#D48FA6] hover:to-[#A793F2] text-white px-10 py-4 text-xl rounded-xl shadow-xl transform hover:scale-105 transition-all duración-300"
             >
               Empezar Ahora
             </Button>
