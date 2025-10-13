@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import PhoneInput from '@/components/PhoneInput';
+import { useCategories } from '@/features/categories/useCategories';
 
 /**
  * Modal de creación/edición de proveedor + búsqueda para vincular existente.
@@ -16,9 +17,9 @@ import PhoneInput from '@/components/PhoneInput';
  *  - setForm: (form) => void
  *  - saving: boolean
  *  - myProviders: proveedores del usuario (para buscar y vincular)
- *  - serviceTypes: Array<{value,label}>
+ *  - serviceTypes: Array<{value,label}>           // (legacy, ya no se usa para el picker)
  *  - eventStatus: Array<{value,label}>
- *  - labelFromServiceType: (value) => string
+ *  - labelFromServiceType: (value) => string      // (legacy, usado solo como fallback en listados)
  */
 export default function ProviderFormModal({
   open,
@@ -28,11 +29,12 @@ export default function ProviderFormModal({
   setForm,
   saving,
   myProviders = [],
-  serviceTypes = [],
+  serviceTypes = [],            // mantenido para compatibilidad, no se usa en el select
   eventStatus = [],
   labelFromServiceType,
 }) {
   const [query, setQuery] = useState('');
+  const { byId: categoriesById } = useCategories();
 
   // normaliza para búsquedas (quita acentos y pasa a minúsculas)
   const norm = (s) =>
@@ -41,19 +43,53 @@ export default function ProviderFormModal({
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
 
+  // Obtener etiqueta "Padre › Hija" desde app_categories (fallback: service_type legacy)
+  const getCategoryLabel = (provider) => {
+    const cid = provider?.category_id;
+    if (cid && categoriesById[cid]) {
+      const cat = categoriesById[cid];
+      const parent = cat?.parent_id ? categoriesById[cat.parent_id] : null;
+      return parent ? `${parent.name} › ${cat.name}` : cat.name;
+    }
+    return labelFromServiceType?.(provider?.service_type) || '—';
+  };
+
+  // Opciones flateadas de categorías (Padre primero, luego sus hijas)
+  const categoryOptions = useMemo(() => {
+    const all = Object.values(categoriesById || {});
+    const parents = all.filter((c) => !c.parent_id).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    const childrenByParent = new Map();
+    all.forEach((c) => {
+      if (c.parent_id) {
+        if (!childrenByParent.has(c.parent_id)) childrenByParent.set(c.parent_id, []);
+        childrenByParent.get(c.parent_id).push(c);
+      }
+    });
+    parents.forEach((p) => {
+      const kids = childrenByParent.get(p.id);
+      if (kids) kids.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    });
+
+    const out = [];
+    parents.forEach((p) => {
+      out.push({ id: p.id, label: p.name }); // el padre también es seleccionable
+      const kids = childrenByParent.get(p.id) || [];
+      kids.forEach((k) => out.push({ id: k.id, label: `${p.name} › ${k.name}` }));
+    });
+    return out;
+  }, [categoriesById]);
+
   const filteredExisting = useMemo(() => {
     const q = norm(query.trim());
     if (!q) return [];
     return myProviders
       .filter((p) => {
-        const label = labelFromServiceType?.(p.service_type); // p.ej. "Fotografía"
-        const hay = norm(
-          `${p.name ?? ''} ${p.service_type ?? ''} ${p.category ?? ''} ${label ?? ''}`
-        );
+        const label = getCategoryLabel(p);
+        const hay = norm(`${p.name ?? ''} ${label ?? ''}`);
         return hay.includes(q);
       })
       .slice(0, 8);
-  }, [myProviders, query, labelFromServiceType]);
+  }, [myProviders, query, categoriesById]);
 
   const handlePickExisting = async (provider) => {
     try {
@@ -61,7 +97,7 @@ export default function ProviderFormModal({
         ...form,
         id: provider.id,
         name: provider.name,
-        service_type: provider.service_type,
+        // ya no necesitamos pasar service_type; _linkOnly usa el id
         _linkOnly: true,
       });
       setQuery('');
@@ -97,7 +133,7 @@ export default function ProviderFormModal({
                   >
                     <div className="font-medium">{p.name}</div>
                     <div className="text-xs text-gray-400">
-                      {labelFromServiceType?.(p.service_type) || '—'}
+                      {getCategoryLabel(p)}
                     </div>
                   </button>
                 ))}
@@ -124,12 +160,13 @@ export default function ProviderFormModal({
             <label className="block text-sm text-gray-300 mb-1">Categoría</label>
             <select
               className="w-full p-2 rounded border border-white/20 bg-white text-gray-900"
-              value={form.service_type}
-              onChange={(e) => setForm({ ...form, service_type: e.target.value })}
+              value={form.category_id || ''}                          // ← ahora usamos category_id
+              onChange={(e) => setForm({ ...form, category_id: e.target.value || null })}
             >
-              {serviceTypes.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
+              <option value="">Selecciona una categoría</option>
+              {categoryOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
                 </option>
               ))}
             </select>

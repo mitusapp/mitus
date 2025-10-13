@@ -10,6 +10,18 @@ import { toast } from '@/components/ui/use-toast';
 import ProvidersList from '../../components/planner/ProvidersList.jsx';
 import ProviderFormModal from '../../components/planner/ProviderFormModal.jsx';
 
+// NEW: categorías globales (Padre › Hija)
+import { useCategories } from '@/features/categories/useCategories';
+
+// NEW: modal para seleccionar y vincular proveedores globales
+import ProviderPickerModal from '@/components/planner/ProviderPickerModal';
+
+// NEW: reutilizamos el modal global con todos los campos
+import ContactsFormModal from '@/components/profile/ContactsFormModal';
+
+// NEW: modal de vista detallada
+import ProviderViewModal from '@/components/profile/ProviderViewModal';
+
 /** Catálogo normalizado: service_type → etiqueta visible (enfocado en eventos sociales) */
 const SERVICE_TYPES = [
   { value: 'wedding_planner', label: 'Organizador/a de bodas' },
@@ -70,7 +82,8 @@ const EVENT_TYPE_LABELS = {
 const emptyForm = {
   id: null,
   name: '',
-  service_type: 'other',
+  category_id: null,           // nueva taxonomía
+  service_type: 'other',       // legacy compat (no se escribe a DB)
   contact_name: '',
   email: '',
   phone: '',
@@ -78,23 +91,34 @@ const emptyForm = {
   instagram: '',
   notes: '',
   location: '',
-  event_status: 'tentative', // por evento
+  about: '',
+  bank_details: '',
+  event_status: 'tentative',   // por evento
 };
 
 const PlannerProviders = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { byId: categoriesById } = useCategories();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [openForm, setOpenForm] = useState(false);
+  const [openForm, setOpenForm] = useState(false);            // legacy (sigue presente, no se usa para editar desde lista)
   const [form, setForm] = useState(emptyForm);
 
   const [rows, setRows] = useState([]);
   const [myProviders, setMyProviders] = useState([]);
 
-  // ---- Encabezado: "Boda de Ana y Luis – 25/10/2025"
+  // Picker + ContactsForm
+  const [openPicker, setOpenPicker] = useState(false);
+  const [openContactsForm, setOpenContactsForm] = useState(false);
+
+  // View modal
+  const [openView, setOpenView] = useState(false);
+  const [viewRow, setViewRow] = useState(null);
+
+  // Encabezado del evento
   const [eventHeader, setEventHeader] = useState('');
 
   const formatShortEsDate = (d) => {
@@ -124,7 +148,6 @@ const PlannerProviders = () => {
       setEventHeader('');
     }
   }, [eventId]);
-  // --------------------------------------------------------------------------
 
   const loadProviders = useCallback(async () => {
     if (!user) return;
@@ -147,11 +170,7 @@ const PlannerProviders = () => {
       setMyProviders(mine || []);
     } catch (e) {
       console.error(e);
-      toast({
-        title: 'Error al cargar proveedores',
-        description: e.message,
-        variant: 'destructive',
-      });
+      toast({ title: 'Error al cargar proveedores', description: e.message, variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -160,12 +179,8 @@ const PlannerProviders = () => {
   useEffect(() => { fetchEventInfo(); }, [fetchEventInfo]);
   useEffect(() => { loadProviders(); }, [loadProviders]);
 
-  // normalizador para búsqueda sin acentos
   const norm = (s) =>
-    String(s || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
+    String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
   const [query, setQuery] = useState('');
   const filtered = useMemo(() => {
@@ -173,25 +188,35 @@ const PlannerProviders = () => {
     if (!q) return rows;
     return rows.filter((r) => {
       const p = r.planner_providers || {};
-      const categoryLabel = labelFromServiceType(p.service_type) || '';
+      let categoryLabel = '';
+      if (p.category_id && categoriesById[p.category_id]) {
+        const cat = categoriesById[p.category_id];
+        const parent = cat?.parent_id ? categoriesById[cat.parent_id] : null;
+        categoryLabel = parent ? `${parent.name} ${cat.name}` : cat.name;
+      } else {
+        categoryLabel = labelFromServiceType(p.service_type) || '';
+      }
       const haystack = norm(
         `${p.name ?? ''} ${p.service_type ?? ''} ${categoryLabel} ${p.contact_name ?? ''} ${p.email ?? ''} ${p.phone ?? ''} ${p.instagram ?? ''} ${p.website ?? ''} ${p.location ?? ''} ${r.status ?? ''}`
       );
       return haystack.includes(q);
     });
-  }, [rows, query]);
+  }, [rows, query, categoriesById]);
 
+  // Abrir picker para agregar proveedores (seleccionar o crear)
   const openCreate = () => {
     setForm(emptyForm);
-    setOpenForm(true);
+    setOpenPicker(true);
   };
 
+  // EDITAR: ahora abre ContactsFormModal (no ProviderFormModal)
   const openEdit = (row) => {
     const p = row?.planner_providers || {};
     setForm({
       id: p.id,
       name: p.name || '',
-      service_type: p.service_type || 'other',
+      category_id: p.category_id || null,
+      service_type: p.service_type || 'other', // compat
       contact_name: p.contact_name || '',
       email: p.email || '',
       phone: p.phone || '',
@@ -199,12 +224,37 @@ const PlannerProviders = () => {
       instagram: p.instagram || '',
       notes: p.notes || '',
       location: p.location || '',
+      about: p.about || '',
+      bank_details: p.bank_details || '',
       event_status: row.status || 'tentative',
     });
-    setOpenForm(true);
+    setOpenContactsForm(true);
   };
 
-  // Crear/editar proveedor y/o vincularlo con status por evento
+  // VER: abre ProviderViewModal
+  const handleView = (row) => {
+    setViewRow(row);
+    setOpenView(true);
+  };
+
+  // Cambiar estado inline (picker en tabla)
+  const handleStatusChange = async (provider_id, newStatus) => {
+    try {
+      const { error } = await supabase
+        .from('event_providers')
+        .update({ status: newStatus })
+        .eq('event_id', eventId)
+        .eq('provider_id', provider_id);
+      if (error) throw error;
+      toast({ title: 'Estado actualizado' });
+      await loadProviders();
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'No se pudo actualizar el estado', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  // Guardar (legacy modal del planner) — se mantiene por compat, no se usa al editar desde lista
   const handleSubmit = async (payload) => {
     setSaving(true);
     try {
@@ -234,8 +284,7 @@ const PlannerProviders = () => {
           .from('planner_providers')
           .update({
             name: payload.name,
-            service_type: payload.service_type,
-            category: payload.service_type,
+            category_id: payload.category_id || null,
             contact_name: payload.contact_name || null,
             email: payload.email || null,
             phone: payload.phone || null,
@@ -243,6 +292,8 @@ const PlannerProviders = () => {
             instagram: payload.instagram?.replace(/^@/, '') || null,
             notes: payload.notes || null,
             location: payload.location || null,
+            about: payload.about || null,
+            bank_details: payload.bank_details || null,
           })
           .eq('id', providerId)
           .eq('user_id', user.id);
@@ -253,8 +304,7 @@ const PlannerProviders = () => {
           .insert([{
             user_id: user.id,
             name: payload.name,
-            service_type: payload.service_type,
-            category: payload.service_type,
+            category_id: payload.category_id || null,
             contact_name: payload.contact_name || null,
             email: payload.email || null,
             phone: payload.phone || null,
@@ -262,6 +312,8 @@ const PlannerProviders = () => {
             instagram: payload.instagram?.replace(/^@/, '') || null,
             notes: payload.notes || null,
             location: payload.location || null,
+            about: payload.about || null,
+            bank_details: payload.bank_details || null,
           }])
           .select('id')
           .single();
@@ -289,6 +341,69 @@ const PlannerProviders = () => {
     } catch (e) {
       console.error(e);
       toast({ title: 'Error al guardar', description: e.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Guardado desde ContactsFormModal (crear/editar global) + vincular
+  const handleSubmitContacts = async (payload) => {
+    setSaving(true);
+    try {
+      let providerId = payload.id;
+      if (providerId) {
+        const { error } = await supabase
+          .from('planner_providers')
+          .update({
+            name: payload.name?.trim(),
+            category_id: payload.category_id || null,
+            contact_name: payload.contact_name?.trim() || null,
+            phone: payload.phone?.trim() || null,
+            email: payload.email?.trim() || null,
+            website: payload.website || null,
+            instagram: payload.instagram?.replace(/^@+/, '') || null,
+            location: payload.location?.trim() || null,
+            about: payload.about?.trim() || null,
+            bank_details: payload.bank_details?.trim() || null,
+            notes: payload.notes?.trim() || null,
+          })
+          .eq('id', providerId)
+          .eq('user_id', user.id);
+        if (error) throw error;
+      } else {
+        const { data, error } = await supabase
+          .from('planner_providers')
+          .insert([{
+            user_id: user.id,
+            name: payload.name?.trim(),
+            category_id: payload.category_id || null,
+            contact_name: payload.contact_name?.trim() || null,
+            phone: payload.phone?.trim() || null,
+            email: payload.email?.trim() || null,
+            website: payload.website || null,
+            instagram: payload.instagram?.replace(/^@+/, '') || null,
+            location: payload.location?.trim() || null,
+            about: payload.about?.trim() || null,
+            bank_details: payload.bank_details?.trim() || null,
+            notes: payload.notes?.trim() || null,
+          }])
+          .select('id')
+          .single();
+        if (error) throw error;
+        providerId = data.id;
+      }
+
+      const { error: linkErr } = await supabase
+        .from('event_providers')
+        .insert([{ event_id: eventId, provider_id: providerId, status: 'tentative' }]);
+      if (linkErr && linkErr.code !== '23505') throw linkErr;
+
+      toast({ title: 'Proveedor creado y vinculado' });
+      setOpenContactsForm(false);
+      await loadProviders();
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'No se pudo guardar', description: e.message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -330,8 +445,8 @@ const PlannerProviders = () => {
             )}
           </div>
         </div>
-        <Button onClick={openCreate} className="bg-green-600 hover:bg-green-500">
-          <Plus className="w-4 h-4 mr-1" /> Nuevo proveedor
+        <Button onClick={() => setOpenPicker(true)} className="bg-green-600 hover:bg-green-500">
+          <Plus className="w-4 h-4 mr-1" /> Agregar proveedores
         </Button>
       </div>
 
@@ -348,12 +463,16 @@ const PlannerProviders = () => {
       <ProvidersList
         loading={loading}
         rows={filtered}
-        onEdit={openEdit}
+        onView={handleView}                             // NUEVO: ver
+        onEdit={openEdit}                               // ahora abre ContactsFormModal
         onUnlink={unlinkProvider}
+        onStatusChange={handleStatusChange}             // NUEVO: estado inline
         labelFromServiceType={labelFromServiceType}
         labelFromEventStatus={labelFromEventStatus}
+        statusOptions={EVENT_STATUS}
       />
 
+      {/* Modal legacy del planner (se mantiene por compat) */}
       <ProviderFormModal
         open={openForm}
         onOpenChange={setOpenForm}
@@ -365,6 +484,39 @@ const PlannerProviders = () => {
         serviceTypes={SERVICE_TYPES}
         eventStatus={EVENT_STATUS}
         labelFromServiceType={labelFromServiceType}
+      />
+
+      {/* Picker de proveedores globales */}
+      <ProviderPickerModal
+        open={openPicker}
+        onOpenChange={setOpenPicker}
+        eventId={eventId}
+        onLinked={loadProviders}
+        onCreateNew={() => {
+          setOpenPicker(false);
+          setForm(emptyForm);
+          setOpenContactsForm(true);
+        }}
+      />
+
+      {/* Form global (crear/editar proveedor) */}
+      <ContactsFormModal
+        open={openContactsForm}
+        onOpenChange={setOpenContactsForm}
+        onSubmit={handleSubmitContacts}
+        form={form}
+        setForm={setForm}
+        saving={saving}
+        serviceTypes={SERVICE_TYPES} // compat si aún lo espera
+      />
+
+      {/* Modal de vista (información + productos/servicios del proveedor) */}
+      <ProviderViewModal
+        open={openView}
+        onOpenChange={setOpenView}
+        provider={viewRow?.planner_providers || null}
+        providerId={viewRow?.planner_providers?.id || null}
+        eventId={eventId}
       />
     </div>
   );
