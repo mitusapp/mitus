@@ -17,6 +17,9 @@ import TasksKanban from '@/components/planner/TasksKanban.jsx';
 import TaskFormModal from '@/components/planner/TaskFormModal.jsx';
 import TasksSummary from '@/components/planner/TasksSummary.jsx';
 
+// Categorías (nuevo)
+import { useCategories } from '@/features/categories/useCategories';
+
 /* --------------------------- Helpers de fecha (LOCAL) --------------------------- */
 // Acepta 'YYYY-MM-DD' o ISO con 'T' y devuelve Date local
 const parseLocalYMD = (s) => {
@@ -43,7 +46,7 @@ const formatShortEsDate = (d) => {
 };
 /* ------------------------------------------------------------------------------- */
 
-/** Catálogo de categorías (mismas que proveedores) */
+/** Catálogo de categorías (LEGADO) – se mantiene para compatibilidad visual en List/Kanban */
 const SERVICE_TYPES = [
   { value: 'wedding_planner', label: 'Organizador/a de bodas' },
   { value: 'photography', label: 'Fotografía' },
@@ -105,6 +108,19 @@ const PlannerTasks = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
 
+  // Categorías (nuevo)
+  const { byId } = useCategories();
+  const getCategoryLabel = useCallback(
+    (id) => {
+      if (!id) return '';
+      const c = byId[id];
+      if (!c) return '';
+      const parent = c.parent_id ? byId[c.parent_id] : null;
+      return parent ? `${parent.name} › ${c.name}` : c.name;
+    },
+    [byId]
+  );
+
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState('list'); // list | kanban
@@ -117,7 +133,10 @@ const PlannerTasks = () => {
     description: '',
     due_date: '',
     priority: null,
+    // LEGADO: se mantiene en el estado para no romper compatibilidad en BD/vistas
     category: '',
+    // NUEVO:
+    category_id: null,
     assignee_team_id: null,
     visibility: 'private',
   });
@@ -186,9 +205,12 @@ const PlannerTasks = () => {
         ? {
             title: task.title,
             description: task.description || '',
-            due_date: ensureYMD(task.due_date || ''), // <-- Sanitiza ISO -> YMD para <input date>
+            due_date: ensureYMD(task.due_date || ''), // Sanitiza ISO -> YMD
             priority: task.priority || null,
+            // LEGADO:
             category: task.category || '',
+            // NUEVO:
+            category_id: task.category_id || null,
             assignee_team_id: task.assignee_team_id || null,
             visibility: task.visibility || 'private',
           }
@@ -198,6 +220,7 @@ const PlannerTasks = () => {
             due_date: '',
             priority: null,
             category: '',
+            category_id: null,
             assignee_team_id: null,
             visibility: 'private',
           }
@@ -209,22 +232,40 @@ const PlannerTasks = () => {
     e.preventDefault();
     setSaving(true);
 
-    const payload = {
+    // Payload con nuevo campo category_id (y legado category para compatibilidad)
+    const basePayload = {
       event_id: eventId,
       title: formData.title,
       description: formData.description || null,
-      due_date: ensureYMD(formData.due_date) || null, // <-- Guardar siempre 'YYYY-MM-DD'
+      due_date: ensureYMD(formData.due_date) || null,
       priority: formData.priority || null,
-      category: formData.category || null,
+      category: formData.category || null,       // LEGADO (no se toca aún)
+      category_id: formData.category_id || null, // NUEVO
       assignee_team_id: formData.assignee_team_id || null,
       visibility: formData.visibility || 'private',
     };
 
-    let error;
-    if (currentTask) {
-      ({ error } = await supabase.from('planner_tasks').update(payload).eq('id', currentTask.id));
-    } else {
-      ({ error } = await supabase.from('planner_tasks').insert(payload));
+    // Helper para ejecutar insert/update
+    const execSave = async (payload) => {
+      if (currentTask) {
+        return await supabase.from('planner_tasks').update(payload).eq('id', currentTask.id);
+      }
+      return await supabase.from('planner_tasks').insert(payload);
+    };
+
+    let { error } = await execSave(basePayload);
+
+    // Fallback: si la columna category_id aún no existe en BD, reintenta sin ese campo
+    if (error && /category_id/i.test(error.message) && /does not exist/i.test(error.message)) {
+      const { category_id, ...legacyPayload } = basePayload;
+      const retry = await execSave(legacyPayload);
+      error = retry.error;
+      if (!retry.error) {
+        toast({
+          title: 'Guardado sin categoría jerárquica',
+          description: 'Aún no existe la columna category_id en planner_tasks. Se guardó sin esa categoría.',
+        });
+      }
     }
 
     if (error) {
@@ -287,14 +328,24 @@ const PlannerTasks = () => {
     const visLabel = { private: 'Privado', team: 'Equipo', public: 'Público' };
 
     return tasks.filter((t) => {
-      const catLabel = labelFromServiceType(t.category) || '';
+      const catLabelLegacy = labelFromServiceType(t.category) || '';
+      const catLabelNew = getCategoryLabel(t.category_id) || '';
       const assignee = t.assignee_team_id ? (teamMap[t.assignee_team_id] || '') : '';
       const hay = norm(
-        `${t.title} ${t.description || ''} ${t.category || ''} ${catLabel} ${t.priority || ''} ${assignee} ${t.visibility || ''} ${visLabel[t.visibility] || ''} ${t.status || ''} ${statusLabel[t.status] || ''} ${t.due_date || ''}`
+        `${t.title} ${t.description || ''} ${t.category || ''} ${catLabelLegacy} ${catLabelNew} ${t.priority || ''} ${assignee} ${t.visibility || ''} ${visLabel[t.visibility] || ''} ${t.status || ''} ${statusLabel[t.status] || ''} ${t.due_date || ''}`
       );
       return hay.includes(q);
     });
-  }, [tasks, query, teamMap]);
+  }, [tasks, query, teamMap, getCategoryLabel]);
+
+  // Para mantener la UI actual sin tocar TasksList/TasksKanban:
+  // sobrescribimos SOLO para vista el campo 'category' con el label de category_id (si existe).
+  const viewTasks = useMemo(() => {
+    return (filteredTasks || []).map((t) => {
+      const newLabel = getCategoryLabel(t.category_id);
+      return newLabel ? { ...t, category: newLabel } : t;
+    });
+  }, [filteredTasks, getCategoryLabel]);
 
   // --- Items para el resumen (solo tareas) -----------------------------------
   const summaryItems = useMemo(() => {
@@ -372,20 +423,20 @@ const PlannerTasks = () => {
             <div className="text-center text-white">Cargando tareas...</div>
           ) : view === 'list' ? (
             <TasksList
-              tasks={filteredTasks}
+              tasks={viewTasks}
               onToggleStatus={updateTaskStatus}
               onEdit={handleOpenModal}
               onDelete={handleDeleteTask}
-              labelFromServiceType={labelFromServiceType}
+              labelFromServiceType={labelFromServiceType} // se mantiene para items LEGADO
               teamMembers={teamMembers}
             />
           ) : (
             <TasksKanban
-              tasks={filteredTasks}
+              tasks={viewTasks}
               onUpdateStatus={updateTaskStatus}
               onEdit={handleOpenModal}
               onDelete={handleDeleteTask}
-              labelFromServiceType={labelFromServiceType}
+              labelFromServiceType={labelFromServiceType} // se mantiene para items LEGADO
               teamMembers={teamMembers}
             />
           )}
@@ -402,10 +453,8 @@ const PlannerTasks = () => {
         onSubmit={handleSaveTask}
         saving={saving}
         teamMembers={teamMembers}
-        serviceTypes={SERVICE_TYPES}
         priorityOptions={PRIORITY_OPTIONS}
         visibilityOptions={VISIBILITY_OPTIONS}
-        labelFromServiceType={labelFromServiceType}
       />
     </div>
   );

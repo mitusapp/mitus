@@ -802,7 +802,7 @@ const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSl
         </Button>
 
         {/* Nombre del archivo (parte inferior) */}
-        {displayName && (
+        {(event?.settings?.showFileName ?? false) && displayName && (
           <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
             <div className="px-3 py-1 rounded-md text-sm text-black/60 bg-white/70 backdrop-blur-sm">
               {displayName}

@@ -78,15 +78,22 @@ const EventLanding = () => {
   };
 
   const ensureNameOrWarn = () => {
-    if (!validateFullName(guestName)) {
-      toast({
-        title: 'Ingresa tu nombre completo',
-        description: 'Este dato es necesario para continuar.',
-        variant: 'destructive',
-      });
-      return false;
+    const required = !!(event?.settings?.requireGuestName);
+    const name = (guestName || '').trim();
+    if (required) {
+      if (!validateFullName(name)) {
+        toast({
+          title: 'Ingresa tu nombre completo',
+          description: 'Este dato es necesario para continuar.',
+          variant: 'destructive',
+        });
+        return false;
+      }
+      persistName(name);
+      return true;
     }
-    persistName(guestName.trim());
+    // No requerido: permitimos continuar, y si hay nombre lo persistimos.
+    if (name) persistName(name);
     return true;
   };
 
@@ -113,7 +120,7 @@ const EventLanding = () => {
   };
 
   const handleGuestAccess = (action) => {
-    // Todos los flujos requieren nombre completo
+    // Requerimos nombre solo si el host lo activó
     if (!ensureNameOrWarn()) return;
     if (action === 'upload') {
       // Abrir picker inmediatamente (no navegar todavía)
@@ -210,10 +217,12 @@ const EventLanding = () => {
               <p className="text-gray-700 leading-relaxed mb-6">{event.description}</p>
             )}
 
-            {/* Nombre OBLIGATORIO */}
+            {/* Nombre OBLIGATORIO u OPCIONAL según settings */}
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-600 mb-3">
-                Ingresa tu nombre (necesario para continuar):
+                {event?.settings?.requireGuestName
+                  ? 'Ingresa tu nombre (necesario para continuar):'
+                  : 'Tu nombre (opcional, para atribuir tus fotos):'}
               </label>
               <input
                 type="text"

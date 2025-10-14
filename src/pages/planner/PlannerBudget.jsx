@@ -1,4 +1,4 @@
-// src/pages/planner/PlannerBudget.jsx (con export PDF refinado)
+// src/pages/planner/PlannerBudget.jsx (con export PDF refinado + category_id)
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
@@ -12,6 +12,7 @@ import BudgetSummary from '@/components/planner/BudgetSummary.jsx';
 import BudgetList from '@/components/planner/BudgetList.jsx';
 import BudgetFormModal from '@/components/planner/BudgetFormModal.jsx';
 import BudgetPaymentsModal from '@/components/planner/BudgetPaymentsModal.jsx';
+import { useCategories } from '@/features/categories/useCategories'; // ← NUEVO
 
 // ==== Helpers de fecha/moneda ====
 const parseLocalYMD = (s) => {
@@ -120,9 +121,9 @@ export default function PlannerBudget() {
   const [isPaymentsOpen, setIsPaymentsOpen] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
 
-  // Datos del formulario
+  // Datos del formulario  (category → category_id)
   const [formData, setFormData] = useState({
-    category: '', name: '', description: '',
+    category_id: null, name: '', description: '',
     unit_cost: 0, quantity: 1, actual_cost: 0,
     provider_id: null, priority: null, assignee_team_id: null,
   });
@@ -130,6 +131,18 @@ export default function PlannerBudget() {
 
   // Buscador
   const [query, setQuery] = useState('');
+
+  // Categorías (resolver etiqueta Padre › Hija con byId)
+  const { byId } = useCategories(); // ← NUEVO
+  const getCategoryLabel = (it) => {
+    if (it?.category_id && byId && byId[it.category_id]) {
+      const c = byId[it.category_id];
+      const p = c?.parent_id ? byId[c.parent_id] : null;
+      return p ? `${p.name} › ${c.name}` : c.name;
+    }
+    // fallback legacy (string 'category')
+    return labelFromServiceType(it?.category);
+  };
 
   // --- Info del evento (hosts, tipo, fecha, moneda) ---
   const fetchEventInfo = useCallback(async () => {
@@ -305,7 +318,7 @@ export default function PlannerBudget() {
   const openCreate = () => {
     setCurrentItem(null);
     setFormData({
-      category: '',
+      category_id: null,
       name: '',
       description: '',
       unit_cost: 0,
@@ -322,7 +335,7 @@ export default function PlannerBudget() {
   const openEdit = (item) => {
     setCurrentItem(item);
     setFormData({
-      category: item.category || '',
+      category_id: item.category_id ?? null,
       name: item.name || '',
       description: item.description || '',
       unit_cost: item.unit_cost ?? 0,
@@ -348,6 +361,7 @@ export default function PlannerBudget() {
   const saveItem = async () => {
     const payload = {
       ...formData,
+      category_id: formData.category_id || null, // ← NUEVO
       event_id: eventId,
       actual_cost: Number(formData.actual_cost ?? 0),
       provider_id: formData.provider_id || null,
@@ -439,8 +453,8 @@ export default function PlannerBudget() {
       }).join(' ');
       const hay = norm([
         it.name || '',
-        labelFromServiceType(it.category),
-        it.category || '',
+        getCategoryLabel(it),            // ← usa category_id si existe
+        it.category || '',               // ← ayuda a encontrar legacy por string
         it.description || '',
         prov,
         it.priority || '',
@@ -473,7 +487,7 @@ export default function PlannerBudget() {
         if (sched.length === 0) {
           rows.push({
             name: it.name || '',
-            category: labelFromServiceType(it.category),
+            category: getCategoryLabel(it), // ← antes: labelFromServiceType(it.category)
             description: it.description || '',
             provider: it.planner_providers?.name || '',
             priority: labelFromPriority(it.priority || ''),
@@ -485,7 +499,7 @@ export default function PlannerBudget() {
           sched.forEach((r, idx) => {
             rows.push({
               name: `${it.name || ''} ${sched.length > 1 ? `(Cuota ${idx + 1})` : ''}`,
-              category: labelFromServiceType(it.category),
+              category: getCategoryLabel(it), // ← antes: labelFromServiceType(it.category)
               description: it.description || '',
               provider: it.planner_providers?.name || '',
               priority: labelFromPriority(r.priority || it.priority || ''),

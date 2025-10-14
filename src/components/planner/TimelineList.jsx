@@ -1,6 +1,9 @@
+// src/components/planner/TimelineList.jsx
 import React, { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2, ArrowUpDown } from 'lucide-react';
+import { useCategories } from '@/features/categories/useCategories';
+import SearchableSelect from '@/components/common/SearchableSelect.jsx';
 
 export default function TimelineList({
   items = [],
@@ -11,10 +14,11 @@ export default function TimelineList({
   teamMembers = [],
   providersMap = new Map(),
   loading = false,
-  emptyMessage = 'No hay hitos en el cronograma.',
+  emptyMessage = 'No hay actividades en el cronograma.',
   eventHeader = '', // para encabezado del PDF
 }) {
   // -------------------- Estado de filtros y orden --------------------
+  const [fProv, setFProv] = useState('');  // 👈 nuevo: filtro por proveedor
   const [fCat, setFCat] = useState('');
   const [fSubj, setFSubj] = useState('');
   const [fAssignee, setFAssignee] = useState('');
@@ -22,10 +26,23 @@ export default function TimelineList({
   const [sortField, setSortField] = useState('');
   const [sortDir, setSortDir] = useState('asc');
 
-  // Mapa rápido de id → nombre del equipo
+  // 📚 Categorías en memoria (una sola carga; lookup O(1))
+  const { byId } = useCategories();
+  const getCategoryLabel = (id) => {
+    if (!id) return '';
+    const c = byId[id];
+    if (!c) return '';
+    const p = c.parent_id ? byId[c.parent_id] : null;
+    return p ? `${p.name} › ${c.name}` : c.name;
+  };
+
+  // Mapa rápido de id → nombre + rol del equipo
   const teamMap = useMemo(() => {
     const m = new Map();
-    (teamMembers || []).forEach((t) => m.set(t.id, t.display_name || t.name || '—'));
+    (teamMembers || []).forEach((t) => {
+      const label = t?.role ? `${t.name}, ${t.role}` : (t.name || '—');
+      m.set(t.id, label);
+    });
     return m;
   }, [teamMembers]);
 
@@ -44,10 +61,17 @@ export default function TimelineList({
 
   const chronoKey = (it) => `${it.start_date || ''} ${it.start_time || ''}`;
 
+  // ✅ Label visible de categoría priorizando BD; fallback a catálogo legado o string plano
+  const catLabelForItem = (it) =>
+    getCategoryLabel(it.category_id) ||
+    (labelFromServiceType ? (labelFromServiceType(it.category) || '') : '') ||
+    it.category ||
+    '';
+
   const getFieldValue = (it, field) => {
     switch (field) {
       case 'category':
-        return (labelFromServiceType ? (labelFromServiceType(it.category) || it.category) : it.category) || '';
+        return catLabelForItem(it);
       case 'subject':
         return (labelFromSubject ? (labelFromSubject(it.subject) || it.subject) : it.subject) || '';
       case 'assignee':
@@ -64,25 +88,39 @@ export default function TimelineList({
     const subjs = new Map();
     const locs = new Map();
     const assignees = new Map();
+    const provs = new Map(); // 👈 nuevo: opciones de proveedores
 
     (items || []).forEach((it) => {
-      if (it.category) cats.set(it.category, labelFromServiceType ? (labelFromServiceType(it.category) || it.category) : it.category);
+      const catLabel = catLabelForItem(it);
+      if (catLabel) cats.set(catLabel, catLabel); // valor = label visible
       if (it.subject) subjs.set(it.subject, labelFromSubject ? (labelFromSubject(it.subject) || it.subject) : it.subject);
       if (it.location) locs.set(it.location, it.location);
       if (it.assignee_team_id) assignees.set(String(it.assignee_team_id), teamMap.get(it.assignee_team_id) || '');
+
+      // recolectar proveedores desde los items
+      (it.provider_ids || []).forEach((pid) => {
+        const name = providersMap.get(pid)?.name;
+        if (name) provs.set(String(pid), name);
+      });
     });
 
     return {
+      provs: Array.from(provs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
       cats: Array.from(cats, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
       subjs: Array.from(subjs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
       locs: Array.from(locs, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
       assignees: Array.from(assignees, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' })),
     };
-  }, [items, labelFromServiceType, labelFromSubject, teamMap]);
+  }, [items, labelFromSubject, teamMap, providersMap]);
 
   const view = useMemo(() => {
     const filtered = (items || []).filter((it) => {
-      if (fCat && it.category !== fCat) return false;
+      // 👇 nuevo: filtro por proveedor (compara por id como string)
+      if (fProv) {
+        const provIds = (it.provider_ids || []).map(String);
+        if (!provIds.includes(String(fProv))) return false;
+      }
+      if (fCat && catLabelForItem(it) !== fCat) return false; // filtra por label visible
       if (fSubj && it.subject !== fSubj) return false;
       if (fAssignee && String(it.assignee_team_id) !== String(fAssignee)) return false;
       if (fLoc && it.location !== fLoc) return false;
@@ -103,23 +141,39 @@ export default function TimelineList({
     });
 
     return sorted;
-  }, [items, fCat, fSubj, fAssignee, fLoc, sortField, sortDir]);
+  }, [items, fProv, fCat, fSubj, fAssignee, fLoc, sortField, sortDir]);
 
   // -------------------- Exportar PDF --------------------
   const exportPDF = () => {
-    const rows = view; // ya viene filtrado y cronológicamente ordenado
+    const rows = view; // ya viene filtrado y ordenado
     const win = window.open('', '_blank');
     if (!win) return;
 
-    // ---- Título de documento dinámico (tipo + hosts + fecha) ----
+    // ---- Título de documento (usa header, evita duplicar fecha del evento y añade fecha de creación) ----
     const headerForTitle = (eventHeader || '').trim() || 'Evento';
-    let dateForTitle = '';
-    const earliest = (rows || []).map(it => it.start_date).filter(Boolean).sort()[0];
-    if (earliest && earliest.length === 10 && earliest[4] === '-') {
-      const [y,m,d] = earliest.split('-');
-      dateForTitle = `${d}-${m}-${y}`;
+
+    // ¿El header ya tiene una fecha tipo dd/mm/aaaa?
+    const hasDateInHeader = /\b\d{2}\/\d{2}\/\d{4}\b/.test(headerForTitle);
+
+    // Si el header NO trae fecha, usamos la primera start_date (yyyy-mm-dd) y la mostramos como dd-mm-aaaa
+    let eventDateForTitle = '';
+    if (!hasDateInHeader) {
+      const earliest = (rows || []).map(it => it.start_date).filter(Boolean).sort()[0];
+      if (earliest && /^\d{4}-\d{2}-\d{2}$/.test(earliest)) {
+        const [y, m, d] = earliest.split('-');
+        eventDateForTitle = `${d}-${m}-${y}`;
+      }
     }
-    const rawTitle = `Cronograma ${headerForTitle}${dateForTitle ? ' ' + dateForTitle : ''}`;
+
+    // Fecha de creación (hoy) para añadir entre paréntesis, formato seguro para nombre de archivo
+    const nowTitle = new Date();
+    const todayForTitle =
+      `${String(nowTitle.getDate()).padStart(2, '0')}-${String(nowTitle.getMonth() + 1).padStart(2, '0')}-${nowTitle.getFullYear()}`;
+
+    const titleCore = `Cronograma ${headerForTitle}${eventDateForTitle ? ` ${eventDateForTitle}` : ''}`;
+    // → Añadimos la fecha de creación entre paréntesis
+    const rawTitle = `${titleCore} (${todayForTitle})`;
+
     const docTitle = rawTitle
       .replaceAll('/', ' ')
       .replaceAll(':', ' ')
@@ -131,7 +185,8 @@ export default function TimelineList({
       .replaceAll('|', ' ')
       .trim();
 
-    // Tipografía y estilos de impresión profesionales
+
+
     const styles = `
       <style>
         :root{
@@ -141,6 +196,7 @@ export default function TimelineList({
           --bg:#ffffff;        /* white */
           --head:#f8fafc;      /* slate-50 */
           --accent:#111827;    /* gray-900 */
+          --obs:#a16207;       /* amber-700 */
         }
         *{ box-sizing:border-box; }
         html,body{ margin:0; padding:0; background:var(--bg); color:var(--ink); }
@@ -151,9 +207,7 @@ export default function TimelineList({
           border-bottom:1px solid var(--border);
           margin-bottom:12px;
         }
-        .title{
-          font-size:18px; font-weight:800; letter-spacing:.2px; text-transform:uppercase;
-        }
+        .title{ font-size:18px; font-weight:800; letter-spacing:.2px; text-transform:uppercase; }
         .sub{ color:var(--muted); font-size:12px; margin-top:4px; }
         .meta{ color:var(--muted); font-size:11px; margin-top:4px; }
 
@@ -168,13 +222,12 @@ export default function TimelineList({
         .col-what{ width:auto; }
         .col-prov{ width:160px; }
         .col-loc{ width:140px; }
-        .col-subj, .col-assignee, .col-cat{ width:120px; }
+        .col-subj, .col-assignee{ width:120px; }
 
         tr{ page-break-inside:avoid; break-inside:avoid; }
         .activity{ font-weight:700; }
         .muted{ color:var(--muted); }
-        .note{ font-style:italic; }
-        .badge{ display:inline-block; font-size:10px; padding:2px 6px; border:1px solid var(--border); border-radius:9999px; }
+        .obs{ color:var(--obs); font-weight:600; }
 
         .footer{
           position:fixed; left:0; right:0; bottom:0;
@@ -187,8 +240,11 @@ export default function TimelineList({
         .page-num::after { content: counter(page); }
         .total-pages::after { content: counter(pages); }
 
-        @media print{ @page{ margin:16mm 12mm 16mm 12mm; } .wrap{ padding:0; } th, td{ padding:6px 8px; } .footer{ display:none; } }
-          .wrap{ padding:0 0 48px 0; }
+        @media print{
+          @page{ margin:16mm 12mm 16mm 12mm; }
+          .wrap{ padding:0; }
+          th, td{ padding:6px 8px; }
+          .footer{ display:none; }
         }
       </style>
     `;
@@ -213,19 +269,14 @@ export default function TimelineList({
         .join(', ');
       const title = it.title || 'Sin título';
       const desc = it.description ? `<div class="muted">${it.description}</div>` : '';
-      const obs = it.observations ? `<div class="muted note">Observaciones: ${it.observations}</div>` : '';
-      const subj = `${getFieldValue(it,'subject') || '—'}`;
-      const assn = `${getFieldValue(it,'assignee') || '—'}`;
-      const cat  = `${getFieldValue(it,'category') || '—'}`;
-      const loc  = `${getFieldValue(it,'location') || '—'}`;
+      const obs = it.observations ? `<div class="obs">Observaciones: ${it.observations}</div>` : '';
+      const subj = `${getFieldValue(it, 'subject') || '—'}`;
+      const assn = `${getFieldValue(it, 'assignee') || '—'}`;
+      const loc = `${getFieldValue(it, 'location') || '—'}`;
       return `
         <tr class="page">
-          <td class="col-time">
-            ${toTime(it.start_time)}
-          </td>
-          <td class="col-time">
-            ${toTime(it.end_time)}
-          </td>
+          <td class="col-time">${toTime(it.start_time)}</td>
+          <td class="col-time">${toTime(it.end_time)}</td>
           <td class="col-what">
             <div class="activity">${title}</div>
             ${desc}
@@ -235,7 +286,6 @@ export default function TimelineList({
           <td class="col-loc">${loc}</td>
           <td class="col-subj">${subj}</td>
           <td class="col-assignee">${assn}</td>
-          <td class="col-cat">${cat}</td>
         </tr>
       `;
     }).join('');
@@ -259,9 +309,8 @@ export default function TimelineList({
                   <th class="col-what">Actividad / Descripción / Observaciones</th>
                   <th class="col-prov">Proveedor(es)</th>
                   <th class="col-loc">Ubicación</th>
-                  <th class="col-subj">Sujeto</th>
+                  <th class="col-subj">Participante(s)</th>
                   <th class="col-assignee">Responsable</th>
-                  <th class="col-cat">Categoría</th>
                 </tr>
               </thead>
               <tbody>
@@ -274,10 +323,7 @@ export default function TimelineList({
             <span style="float:right">Página <span class="page-num"></span></span>
           </div>
           <script>
-            window.onload = () => {
-              try { window.focus(); } catch(e) {}
-              window.print();
-            };
+            window.onload = () => { try { window.focus(); } catch(e) {} window.print(); };
           </script>
         </body>
       </html>
@@ -292,29 +338,54 @@ export default function TimelineList({
   return (
     <div className="rounded border border-white/10 overflow-hidden">
       {/* Filtros y Exportar */}
-      <div className="p-3 grid grid-cols-1 md:grid-cols-5 gap-2 bg-white/5 border-b border-white/10">
-        <select className="px-2 py-2 rounded bg-white text-gray-900" value={fCat} onChange={(e)=>setFCat(e.target.value)}>
-          <option value="">Categoría (todas)</option>
-          {options.cats.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
-        </select>
-        <select className="px-2 py-2 rounded bg-white text-gray-900" value={fSubj} onChange={(e)=>setFSubj(e.target.value)}>
-          <option value="">Sujeto (todos)</option>
-          {options.subjs.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
-        </select>
-        <select className="px-2 py-2 rounded bg-white text-gray-900" value={fAssignee} onChange={(e)=>setFAssignee(e.target.value)}>
-          <option value="">Responsable (todos)</option>
-          {options.assignees.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
-        </select>
-        <select className="px-2 py-2 rounded bg-white text-gray-900" value={fLoc} onChange={(e)=>setFLoc(e.target.value)}>
-          <option value="">Ubicación (todas)</option>
-          {options.locs.map((o)=> (<option key={o.value} value={o.value}>{o.label}</option>))}
-        </select>
+      <div className="p-3 md:p-4 bg-white/5 border-b border-white/10">
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+          <SearchableSelect
+            label="Proveedor"
+            value={fProv}
+            onChange={setFProv}
+            options={options.provs}
+            placeholder="Todos"
+          />
 
-        <div className="flex gap-2 justify-end">
-          <Button type="button" variant="secondary" onClick={() => setSortField('')}>Quitar orden</Button>
-          <Button type="button" onClick={exportPDF}>Exportar PDF</Button>
+          <SearchableSelect
+            label="Categoría"
+            value={fCat}
+            onChange={setFCat}
+            options={options.cats}
+            placeholder="Todas"
+          />
+
+          <SearchableSelect
+            label="Participante(s)"
+            value={fSubj}
+            onChange={setFSubj}
+            options={options.subjs}
+            placeholder="Todos"
+          />
+
+          <SearchableSelect
+            label="Responsable"
+            value={fAssignee}
+            onChange={setFAssignee}
+            options={options.assignees}
+            placeholder="Todos"
+          />
+
+          <SearchableSelect
+            label="Ubicación"
+            value={fLoc}
+            onChange={setFLoc}
+            options={options.locs}
+            placeholder="Todas"
+          />
+
+          <div className="flex justify-end">
+            <Button type="button" onClick={exportPDF}>Exportar PDF</Button>
+          </div>
         </div>
       </div>
+
 
       {/* Tabla */}
       <div className="overflow-x-auto">
@@ -323,12 +394,11 @@ export default function TimelineList({
             <tr className="bg-white/10 text-left">
               <th className="px-3 py-2">Hora inicio</th>
               <th className="px-3 py-2">Hora fin</th>
-              <th className="px-3 py-2">Actividad</th>
+              <th className="px-3 py-2">Actividad / Descripción / Observaciones</th>
               <th className="px-3 py-2">Proveedor(es)</th>
               <th className="px-3 py-2">Ubicación</th>
-              <th className="px-3 py-2">Sujeto</th>
+              <th className="px-3 py-2">Participante(s)</th>
               <th className="px-3 py-2">Responsable</th>
-              <th className="px-3 py-2">Categoría</th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -351,7 +421,6 @@ export default function TimelineList({
                 .filter(Boolean)
                 .join(', ');
               const subj = getFieldValue(it, 'subject') || '—';
-              const cat = getFieldValue(it, 'category') || '—';
               const ass = getFieldValue(it, 'assignee') || '—';
               return (
                 <tr key={it.id} className="border-b border-white/10">
@@ -360,19 +429,22 @@ export default function TimelineList({
                   <td className="px-3 py-2">
                     <div className="font-semibold">{it.title || 'Sin título'}</div>
                     {it.description && <div className="text-white/70 text-xs">{it.description}</div>}
-                    {it.observations && <div className="italic text-white/60 text-xs">Observaciones: {it.observations}</div>}
+                    {it.observations && (
+                      <div className="text-amber-300 text-xs font-semibold">
+                        Observaciones: {it.observations}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2">{providers || '—'}</td>
                   <td className="px-3 py-2">{it.location || '—'}</td>
                   <td className="px-3 py-2">{subj}</td>
                   <td className="px-3 py-2">{ass}</td>
-                  <td className="px-3 py-2">{cat}</td>
                   <td className="px-3 py-2">
                     <div className="flex gap-2">
                       <Button size="sm" variant="secondary" onClick={() => onEdit && onEdit(it)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => onDelete && onDelete(it)}>
+                      <Button size="sm" variant="destructive" onClick={() => onDelete && onDelete(it.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>

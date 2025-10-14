@@ -5,6 +5,7 @@
 import React, { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { CreditCard, Edit, Trash2 } from 'lucide-react';
+import { useCategories } from '@/features/categories/useCategories'; // ← NUEVO
 
 /* ====== Utils ====== */
 const fmtMoney = (n, currency = 'COP', locale = 'es-CO') => {
@@ -93,6 +94,17 @@ export default function BudgetList({
     return m;
   }, [teamMembers]);
 
+  // ← NUEVO: resolver etiqueta desde category_id con fallback al catálogo legacy
+  const { byId } = useCategories();
+  const getCategoryLabel = (item) => {
+    if (item?.category_id && byId && byId[item.category_id]) {
+      const c = byId[item.category_id];
+      const p = c?.parent_id ? byId[c.parent_id] : null;
+      return p ? `${p.name} › ${c.name}` : c.name;
+    }
+    return labelFromServiceType(item?.category); // fallback legacy
+  };
+
   /** Aplana a filas por CUOTA. Si un gasto no tiene cuotas, se crea una virtual por el total. */
   const rows = useMemo(() => {
     const out = [];
@@ -136,7 +148,7 @@ export default function BudgetList({
           assignee: item.assignee_team_id || null,
           prioSort: prioWeight[item.priority] ?? 0,
           providerName: item.planner_providers?.name || 'N/A',
-          categoryLabel: labelFromServiceType(item.category),
+          categoryLabel: getCategoryLabel(item), // ← antes: labelFromServiceType(item.category)
           description: item.description || '',
         });
         continue;
@@ -160,7 +172,7 @@ export default function BudgetList({
           assignee: r._assignee,
           prioSort: prioWeight[r._priority] ?? 0,
           providerName: item.planner_providers?.name || 'N/A',
-          categoryLabel: labelFromServiceType(item.category),
+          categoryLabel: getCategoryLabel(item), // ← antes: labelFromServiceType(item.category)
           description: item.description || '',
         });
       }
@@ -178,7 +190,7 @@ export default function BudgetList({
     });
 
     return out;
-  }, [items, schedulesByItem, paymentsByItem]);
+  }, [items, schedulesByItem, paymentsByItem, byId]); // ← dependemos de byId
 
   return (
     <div className="rounded border border-white/10 overflow-x-auto">

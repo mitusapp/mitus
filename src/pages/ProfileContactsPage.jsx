@@ -18,7 +18,7 @@ import { useCategories } from '@/features/categories/useCategories';
 import ProviderViewModal from '@/components/profile/ProviderViewModal';
 
 const normalize = (s) =>
-  (s || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 export default function ProfileContactsPage() {
   const { user } = useAuth();
@@ -203,6 +203,13 @@ export default function ProfileContactsPage() {
     const ok = window.confirm('¿Eliminar este proveedor de tus contactos?');
     if (!ok) return;
     try {
+      // PATCH C: eliminar ítems asociados antes de eliminar el proveedor (no cambia diseño ni resto de lógica)
+      await supabase
+        .from('planner_provider_items')
+        .delete()
+        .eq('provider_id', provider_id)
+        .eq('user_id', user.id);
+
       const { error } = await supabase
         .from('planner_providers')
         .delete()

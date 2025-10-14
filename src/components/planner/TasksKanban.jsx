@@ -2,13 +2,14 @@
 import React, { useMemo } from 'react';
 import { Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useCategories } from '@/features/categories/useCategories';
 
 export default function TasksKanban({
   tasks = [],
   onUpdateStatus,        // (taskId, nextStatus) => void
   onEdit,                // (task) => void
   onDelete,              // (taskId) => void
-  labelFromServiceType,  // (value) => string
+  labelFromServiceType,  // (value) => string (LEGADO: fallback)
   teamMembers = [],      // [{id,name}]
 }) {
 
@@ -17,6 +18,16 @@ export default function TasksKanban({
     (teamMembers || []).forEach((t) => { m[t.id] = t.name; });
     return m;
   }, [teamMembers]);
+
+  // Categorías desde BD (nuevo)
+  const { byId } = useCategories();
+  const getCategoryLabel = React.useCallback((id) => {
+    if (!id) return '';
+    const c = byId[id];
+    if (!c) return '';
+    const parent = c.parent_id ? byId[c.parent_id] : null;
+    return parent ? `${parent.name} › ${c.name}` : c.name;
+  }, [byId]);
 
   // --- Utilidades de fecha y orden ---
   const parseLocalDate = (d) => {
@@ -96,7 +107,9 @@ export default function TasksKanban({
           <div className="space-y-3">
             {tasksInCol.map((task) => {
               const assignee = task.assignee_team_id ? (teamMap[task.assignee_team_id] || '—') : '—';
-              const catLabel = labelFromServiceType?.(task.category) || task.category || '—';
+              // Prioridad a category_id (BD). Fallback al LEGADO si no existe.
+              const catFromDb = getCategoryLabel(task.category_id);
+              const catLabel = catFromDb || labelFromServiceType?.(task.category) || task.category || '—';
               return (
                 <div key={task.id} className="bg-white/5 p-3 rounded-lg border border-white/10">
                   <p className="font-semibold text-white">

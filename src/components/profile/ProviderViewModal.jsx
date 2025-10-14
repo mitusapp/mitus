@@ -219,7 +219,7 @@ export default function ProviderViewModal({ open, onOpenChange, row }) {
                             }}
                             placeholder="0"
                           />
-                          {it.price ? (
+                          {it.price !== null && it.price !== undefined ? (
                             <div className="text-xs text-gray-500 mt-1">{fmtCurrency(it.price)}</div>
                           ) : null}
                         </td>

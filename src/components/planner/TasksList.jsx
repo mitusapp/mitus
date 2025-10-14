@@ -2,13 +2,14 @@
 import React from 'react';
 import { CheckCircle, Circle, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useCategories } from '@/features/categories/useCategories';
 
 export default function TasksList({
   tasks = [],
   onToggleStatus,        // (taskId, nextStatus) => void
   onEdit,                // (task) => void
   onDelete,              // (taskId) => void
-  labelFromServiceType,  // (value) => string
+  labelFromServiceType,  // (value) => string  (LEGADO: fallback)
   teamMembers = [],      // opcional: [{id, name}] para mostrar "Responsable"
 }) {
   // ---- Helpers de fecha (local, sin desfases) -------------------------------
@@ -70,6 +71,16 @@ export default function TasksList({
 
   const nextStatus = (s) => (s === 'completed' ? 'pending' : 'completed');
 
+  // ---- Categorías desde BD --------------------------------------------------
+  const { byId } = useCategories();
+  const getCategoryLabel = React.useCallback((id) => {
+    if (!id) return '';
+    const c = byId[id];
+    if (!c) return '';
+    const parent = c.parent_id ? byId[c.parent_id] : null;
+    return parent ? `${parent.name} › ${c.name}` : c.name;
+  }, [byId]);
+
   // ---- ORDEN: fecha (ASC) y, empate, prioridad (Alta->Media->Baja) ---------
   const prioRank = (p) => ({ high: 0, medium: 1, low: 2 }[p] ?? 3);
 
@@ -108,7 +119,9 @@ export default function TasksList({
         <tbody>
           {sortedTasks.map((task) => {
             const completed = task.status === 'completed';
-            const catLabel = labelFromServiceType?.(task.category) || task.category || '—';
+            // Prioridad a category_id (BD). Fallback al LEGADO si no existe.
+            const catFromDb = getCategoryLabel(task.category_id);
+            const catLabel = catFromDb || labelFromServiceType?.(task.category) || task.category || '—';
             const assignee = task.assignee_team_id ? (teamMap[task.assignee_team_id] || '—') : '—';
             return (
               <tr key={task.id} className="border-b border-white/10 hover:bg-white/5">
@@ -124,7 +137,7 @@ export default function TasksList({
                     <div>
                       <div className={`font-medium text-white ${completed ? 'line-through text-gray-400' : ''}`}>
                         {task.title}
-                        {priorityChip(task.priority)}
+                        {/* (removido) chip de prioridad aquí */}
                       </div>
                       {task.description && (
                         <div className="text-xs text-gray-400 mt-1 line-clamp-2">{task.description}</div>

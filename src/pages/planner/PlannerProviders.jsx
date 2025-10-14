@@ -513,11 +513,10 @@ const PlannerProviders = () => {
       {/* Modal de vista (información + productos/servicios del proveedor) */}
       <ProviderViewModal
         open={openView}
-        onOpenChange={setOpenView}
-        provider={viewRow?.planner_providers || null}
-        providerId={viewRow?.planner_providers?.id || null}
-        eventId={eventId}
+        onOpenChange={(v) => { setOpenView(v); if (!v) setViewRow(null); }}
+        row={viewRow}
       />
+
     </div>
   );
 };

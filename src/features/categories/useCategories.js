@@ -9,7 +9,8 @@ export function useCategories() {
   const [items, setItems] = useState([]); // globales + propias
 
   const fetchAll = useCallback(async () => {
-    if (!user) return;
+    // PATCH B: evitar loading infinito cuando no hay usuario
+    if (!user) { setItems([]); setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase
       .from('app_categories')
@@ -38,9 +39,9 @@ export function useCategories() {
 
   const ensure = useCallback(async (name, parentId = null) => {
     if (!user) throw new Error('No user');
+    // PATCH A: evitar duplicados global/usuario (comparar por nombre + padre, sin filtrar por user_id)
     const exists = items.find(c =>
       (c.parent_id || null) === (parentId || null) &&
-      (c.user_id || null) === (user.id || null) &&
       c.name.toLowerCase().trim() === String(name).toLowerCase().trim()
     );
     if (exists) return exists;

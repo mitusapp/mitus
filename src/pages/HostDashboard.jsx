@@ -318,7 +318,7 @@ const HostDashboard = () => {
             <LinkRow label="Ver invitación" link={invitationLink} />
           </ActionCard>
 
-          <ActionCard icon={<Eye />} title="Galería">
+          <ActionCard icon={<Eye />} title="Subir fotos y ver galería">
             {/* QR y enlace principal: LANDING DE SUBIDA */}
             <Button onClick={() => downloadQR(uploadLink, 'upload-qr.png', 'gallery')} className="w-full mb-2">
               <Download className="w-4 h-4 mr-2" />Descargar QR

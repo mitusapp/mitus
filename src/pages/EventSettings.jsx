@@ -1,8 +1,7 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Save, Trash2, Image, Video, Lock, Download, Eye, KeyRound, Hash } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Image, Video, Lock, Download, Eye, KeyRound, Hash, User, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -29,6 +28,9 @@ const EventSettings = () => {
     galleryExpiryDate: null,
     downloadCode: '',
     downloadLimit: 10,
+    // ---- Claves puntuales para galería (sin editor de categorías) ----
+    requireGuestName: false,  // pedir nombre al invitado antes de subir (se usará en flujo de upload)
+    showFileName: false,      // mostrar nombre de archivo en visor (se usará en la galería)
   });
   const [loading, setLoading] = useState(true);
 
@@ -49,7 +51,8 @@ const EventSettings = () => {
         date: data.date || '',
         location: data.location || '',
       });
-      setSettings(prev => ({ ...prev, ...data.settings }));
+      // Merge: conserva defaults locales y trae lo que ya exista en BD
+      setSettings(prev => ({ ...prev, ...(data.settings || {}) }));
     }
     setLoading(false);
   }, [eventId, navigate]);
@@ -113,7 +116,7 @@ const EventSettings = () => {
   }
 
   return (
-    <div className="min-h-screen py-8 px-4 bg-[#F9F8F7]">
+    <div className="min-h-screen py-8 px-4 bg-[#F9F8F7] pb-24">
       <div className="max-w-4xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
           <div className="flex items-center mb-8">
@@ -150,6 +153,24 @@ const EventSettings = () => {
                 <SettingSwitch id="requireModeration" label="Requerir moderación" description="Las subidas deben ser aprobadas antes de ser públicas." icon={<Lock />} checked={settings.requireModeration} onCheckedChange={(val) => handleSettingChange('requireModeration', val)} />
                 <SettingSwitch id="allowGalleryView" label="Galería pública para invitados" icon={<Eye />} checked={settings.allowGalleryView} onCheckedChange={(val) => handleSettingChange('allowGalleryView', val)} />
                 <SettingSwitch id="allowDownloads" label="Permitir descargas individuales" icon={<Download />} checked={settings.allowDownloads} onCheckedChange={(val) => handleSettingChange('allowDownloads', val)} />
+
+                {/* Mantener switches útiles que no dependen del editor de categorías */}
+                <SettingSwitch
+                  id="requireGuestName"
+                  label="Pedir nombre al invitado antes de subir"
+                  description="Se solicitará una sola vez para atribuir las subidas."
+                  icon={<User className="w-4 h-4" />}
+                  checked={!!settings.requireGuestName}
+                  onCheckedChange={(v) => handleSettingChange('requireGuestName', v)}
+                />
+                <SettingSwitch
+                  id="showFileName"
+                  label="Mostrar nombre de archivo en el visor"
+                  description="Útil para fotógrafos o control interno."
+                  icon={<FileText className="w-4 h-4" />}
+                  checked={!!settings.showFileName}
+                  onCheckedChange={(v) => handleSettingChange('showFileName', v)}
+                />
               </div>
             </section>
 
@@ -157,11 +178,11 @@ const EventSettings = () => {
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Descarga Completa de Galería</h2>
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="downloadCode" className="text-sm font-medium text-[#5E5E5E] mb-2 block flex items-center"><KeyRound className="w-4 h-4 mr-2"/>Código de Descarga</Label>
+                  <Label htmlFor="downloadCode" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><KeyRound className="w-4 h-4 mr-2"/>Código de Descarga</Label>
                   <input id="downloadCode" type="text" value={settings.downloadCode || ''} onChange={(e) => handleSettingChange('downloadCode', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" placeholder="Ej: BODA2025"/>
                 </div>
                 <div>
-                  <Label htmlFor="downloadLimit" className="text-sm font-medium text-[#5E5E5E] mb-2 block flex items-center"><Hash className="w-4 h-4 mr-2"/>Límite de Descargas</Label>
+                  <Label htmlFor="downloadLimit" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><Hash className="w-4 h-4 mr-2"/>Límite de Descargas</Label>
                   <input id="downloadLimit" type="number" min="0" value={settings.downloadLimit || 0} onChange={(e) => handleSettingChange('downloadLimit', parseInt(e.target.value, 10))} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" />
                 </div>
               </div>
@@ -184,13 +205,6 @@ const EventSettings = () => {
                 </div>
               </div>
             </section>
-
-            <div className="pt-4">
-              <Button onClick={handleSaveSettings} className="bg-[#9E7977] hover:bg-[#8a6866] text-white">
-                <Save className="w-4 h-4 mr-2" />
-                Guardar Cambios
-              </Button>
-            </div>
           </div>
 
           <div className="mt-8 bg-red-100/50 border border-red-500/30 rounded-2xl p-8">
@@ -204,6 +218,18 @@ const EventSettings = () => {
             </Button>
           </div>
         </motion.div>
+      </div>
+
+      {/* Footer de acciones fijo */}
+      <div className="fixed bottom-0 left-0 right-0 z-50">
+        <div className="max-w-4xl mx-auto px-4">
+          <div className="bg-white/95 backdrop-blur border-t border-[#E6E3E0] rounded-t-2xl shadow-[0_-4px_20px_rgba(0,0,0,0.06)] p-3 flex justify-center">
+            <Button onClick={handleSaveSettings} className="bg-[#9E7977] hover:bg-[#8a6866] text-white">
+              <Save className="w-4 h-4 mr-2" />
+              Guardar Cambios
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

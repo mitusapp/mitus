@@ -1,3 +1,4 @@
+// src/pages/planner/PlannerTimeline.jsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -8,6 +9,9 @@ import { supabase } from '@/lib/customSupabaseClient';
 
 import TimelineList from '@/components/planner/TimelineList.jsx';
 import TimelineFormModal from '@/components/planner/TimelineFormModal.jsx';
+
+// 📚 Categorías desde BD
+import { useCategories } from '@/features/categories/useCategories';
 
 const SERVICE_TYPES = [
   { value: 'wedding_planner', label: 'Organizador/a de bodas' },
@@ -62,7 +66,10 @@ const emptyForm = {
   time_start: '', // HH:MM
   date_end: '',   // YYYY-MM-DD
   time_end: '',   // HH:MM
+  // LEGADO:
   category: 'other',
+  // NUEVO:
+  category_id: null,
   subject: '',
   description: '',
   observations: '',
@@ -87,13 +94,23 @@ const EVENT_TYPE_LABELS = {
 const tzOffset = '-05:00';
 const toISOWithTZ = (dateYmd, timeHm = '00:00') => {
   if (!dateYmd) return null;
-  const hm = /:\\d{2}$/.test(timeHm) ? timeHm : `${timeHm}:00`;
+  const hm = /:\d{2}$/.test(timeHm) ? timeHm : `${timeHm}:00`;
   return `${dateYmd}T${hm}${tzOffset}`;
 };
 
 const PlannerTimeline = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+
+  // 📚 Categorías en memoria
+  const { byId } = useCategories();
+  const getCategoryLabel = useCallback((id) => {
+    if (!id) return '';
+    const c = byId[id];
+    if (!c) return '';
+    const p = c.parent_id ? byId[c.parent_id] : null;
+    return p ? `${p.name} › ${c.name}` : c.name;
+  }, [byId]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -174,18 +191,18 @@ const PlannerTimeline = () => {
   }, [eventId]);
 
   const loadTeamMembers = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('planner_team')
-        .select('id, name')
-        .eq('event_id', eventId)
-        .order('name', { ascending: true });
-      if (error) throw error;
-      setTeamMembers(data || []);
-    } catch {
-      setTeamMembers([]);
-    }
-  }, [eventId]);
+  try {
+    const { data, error } = await supabase
+      .from('planner_team')
+      .select('id, name, role')
+      .eq('event_id', eventId)
+      .order('name', { ascending: true });
+    if (error) throw error;
+    setTeamMembers(data || []);
+  } catch {
+    setTeamMembers([]);
+  }
+}, [eventId]);
 
   const loadEventProviders = useCallback(async () => {
     try {
@@ -240,7 +257,10 @@ const PlannerTimeline = () => {
       time_start: derivedStartTime,
       date_end: derivedEndDate,
       time_end: derivedEndTime,
-      category: item.category || 'other',
+      // LEGADO:
+      category: getCategoryLabel(item.category_id) || item.category || 'other',
+      // NUEVO:
+      category_id: item.category_id || null,
       subject: item.subject || '',
       description: item.description || '',
       observations: item.observations || '',
@@ -253,11 +273,11 @@ const PlannerTimeline = () => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Seguro que deseas eliminar este hito?')) return;
+    if (!window.confirm('¿Seguro que deseas eliminar esta actividad?')) return;
     try {
       const { error } = await supabase.from('planner_timeline_items').delete().eq('id', id);
       if (error) throw error;
-      toast({ title: 'Hito eliminado' });
+      toast({ title: 'Actividad eliminada' });
       await loadTimeline();
     } catch (e) {
       toast({ title: 'No se pudo eliminar', description: e.message, variant: 'destructive' });
@@ -267,7 +287,7 @@ const PlannerTimeline = () => {
   // Util local sin redeclarar tzOffset
   const toISOWithTZLocal = (dateYmd, timeHm = '00:00') => {
     if (!dateYmd) return null;
-    const hm = /:\\d{2}$/.test(timeHm) ? timeHm : `${timeHm}:00`;
+    const hm = /:\d{2}$/.test(timeHm) ? timeHm : `${timeHm}:00`;
     return `${dateYmd}T${hm}${tzOffset}`;
   };
 
@@ -282,7 +302,8 @@ const PlannerTimeline = () => {
       const start_ts = start_date ? toISOWithTZLocal(start_date, start_time || '00:00') : null;
       const end_ts = end_date && end_time ? toISOWithTZLocal(end_date, end_time) : null;
 
-      const body = {
+      // Base con NUEVO y LEGADO
+      const baseBody = {
         event_id: eventId,
         title: payload.title,
         start_date,
@@ -291,7 +312,10 @@ const PlannerTimeline = () => {
         end_time,
         start_ts,
         end_ts,
+        // LEGADO: mantenemos string (el modal ya lo rellena con label humano)
         category: payload.category || 'other',
+        // NUEVO:
+        category_id: payload.category_id || null,
         subject: payload.subject || null,
         description: payload.description || null,
         observations: payload.observations || null,
@@ -301,30 +325,56 @@ const PlannerTimeline = () => {
         internal_notes: payload.internal_notes || null,
       };
 
-      if (payload.id) {
-        const { error } = await supabase
-          .from('planner_timeline_items')
-          .update(body)
-          .eq('id', payload.id)
-          .eq('event_id', eventId);
-        if (error) throw error;
-        toast({ title: 'Hito actualizado' });
-      } else {
-        const { error } = await supabase.from('planner_timeline_items').insert([body]);
-        if (error) throw error;
-        toast({ title: 'Hito creado' });
+      const execSave = async (body) => {
+        if (payload.id) {
+          return await supabase
+            .from('planner_timeline_items')
+            .update(body)
+            .eq('id', payload.id)
+            .eq('event_id', eventId);
+        }
+        return await supabase.from('planner_timeline_items').insert([body]);
+      };
+
+      let { error } = await execSave(baseBody);
+
+      // Fallback si la columna category_id no existe o la caché no la detecta
+      if (error) {
+        const msg = (error.message || '').toLowerCase();
+        const needsFallback =
+          error.code === 'PGRST204' ||
+          (msg.includes('category_id') && (msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('column')));
+
+        if (needsFallback) {
+          const { category_id, ...legacyBody } = baseBody;
+          // Asegurar que el legado tenga un label útil
+          const legacyLabel = payload.category || getCategoryLabel(payload.category_id) || 'other';
+          const retry = await execSave({ ...legacyBody, category: legacyLabel });
+          if (!retry.error) {
+            toast({
+              title: 'Guardado sin categoría jerárquica',
+              description: 'Aún no existe la columna category_id (o el API no la detecta). Se guardó usando el campo de texto heredado.',
+            });
+            error = null;
+          } else {
+            error = retry.error;
+          }
+        }
       }
 
+      if (error) throw error;
+
+      toast({ title: payload.id ? 'Actividad actualizada' : 'Actividad creada' });
       setIsModalOpen(false);
       await loadTimeline();
     } catch (e) {
-      toast({ title: 'Error al guardar hito', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error al guardar actividad', description: e.message, variant: 'destructive' });
     } finally {
       setSaving(false);
     }
   };
 
-  // ---- Solo búsqueda libre (filtros ahora viven en TimelineList) ----
+  // ---- Búsqueda libre (filtros viven en TimelineList) ----
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items || [];
@@ -333,17 +383,26 @@ const PlannerTimeline = () => {
     (teamMembers || []).forEach((m) => memberMap.set(m.id, (m.name || '').toLowerCase()));
 
     return (items || []).filter((it) => {
-      const catLabel = (labelFromServiceType(it.category) || '').toLowerCase();
+      const catLabelLegacy = (labelFromServiceType(it.category) || it.category || '').toLowerCase();
+      const catLabelNew = (getCategoryLabel(it.category_id) || '').toLowerCase();
       const subjLabel = (labelFromSubject(it.subject) || '').toLowerCase();
       const resp = it.assignee_team_id ? (memberMap.get(it.assignee_team_id) || '') : '';
       const provs = (it.provider_ids || [])
         .map((id) => providersMap.get(id)?.name?.toLowerCase())
         .filter(Boolean)
         .join(' ');
-      const haystack = `${it.title || ''} ${it.description || ''} ${it.location || ''} ${catLabel} ${subjLabel} ${resp} ${provs}`.toLowerCase();
+      const haystack = `${it.title || ''} ${it.description || ''} ${it.location || ''} ${catLabelLegacy} ${catLabelNew} ${subjLabel} ${resp} ${provs}`.toLowerCase();
       return haystack.includes(q);
     });
-  }, [items, query, teamMembers, providersMap]);
+  }, [items, query, teamMembers, providersMap, getCategoryLabel]);
+
+  // Para mantener UI actual sin tocar TimelineList: sobreescribimos 'category' con el label de category_id (si existe)
+  const viewItems = useMemo(() => {
+    return (filtered || []).map((it) => {
+      const newLabel = getCategoryLabel(it.category_id);
+      return newLabel ? { ...it, category: newLabel } : it;
+    });
+  }, [filtered, getCategoryLabel]);
 
   return (
     <div className="p-4 md:p-6">
@@ -365,7 +424,7 @@ const PlannerTimeline = () => {
             </div>
           </div>
           <Button onClick={openCreate} className="bg-purple-600 hover:bg-purple-500">
-            <Plus className="w-4 h-4 mr-1" /> Nuevo hito
+            <Plus className="w-4 h-4 mr-1" /> Nueva actividad
           </Button>
         </div>
 
@@ -380,9 +439,9 @@ const PlannerTimeline = () => {
           />
         </div>
 
-        {/* Filtros por propiedad ahora viven dentro de TimelineList (misma barra que Exportar PDF) */}
+        {/* Filtros por propiedad viven dentro de TimelineList */}
         <TimelineList
-          items={filtered}
+          items={viewItems}
           loading={loading}
           onEdit={openEdit}
           onDelete={handleDelete}
