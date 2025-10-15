@@ -1,0 +1,200 @@
+/* ==========================================================================
+   Gallery Theme System
+   - Solo define variables y overrides CSS de bajo riesgo.
+   - NO cambia tu layout ni clases Tailwind; anula lo mínimo necesario.
+   ========================================================================== */
+
+/* Tipografías opcionales (solo las usa la plantilla Elegant) */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Lora:wght@400;500&display=swap');
+
+/* Base: scope para todas las galerías */
+.gallery-theme {
+  /* Tokens base (conservan tu look por defecto si no se tocan) */
+  --gallery-hero-overlay: rgba(0,0,0,.45);
+  --hero-image-scale: 1.05;
+  --hero-image-blur: 6px;
+
+  --initials-border-color: rgba(255,255,255,.55);
+  --initials-border-width: 3px;
+  --initials-bg: transparent;
+  --initials-backdrop: none;
+
+  --categorybar-bg: rgba(255,255,255,0.90);
+  --categorybar-border: rgba(0,0,0,0.10);
+  --categorybar-shadow: none;
+  --categorybar-link: rgba(0,0,0,.60);
+  --categorybar-link-active: #000000;
+  --categorybar-underline: #000000;
+
+  --grid-gap: 6px;
+  --grid-auto-rows: 1px;
+  --card-radius: 0px;
+  --card-shadow: none;
+
+  --lightbox-bg: #ffffff;
+  --lightbox-radius: 0px;
+  --lightbox-shadow: none;
+}
+
+/* ---------- Overrides puntuales por selectores existentes ---------- */
+
+/* Hero background image: permite variar blur/scale desde plantilla */
+.gallery-theme .hero-bg img {
+  transform: scale(var(--hero-image-scale, 1.05)) !important;
+  filter: blur(var(--hero-image-blur, 6px)) !important;
+}
+
+/* Capa oscura de portada */
+.gallery-theme .hero-overlay {
+  background: var(--gallery-hero-overlay, rgba(0,0,0,.45)) !important;
+}
+
+/* Círculo de iniciales */
+.gallery-theme .initials-circle {
+  border-color: var(--initials-border-color, rgba(255,255,255,.55)) !important;
+  border-width: var(--initials-border-width, 3px) !important;
+  background: var(--initials-bg, transparent) !important;
+  backdrop-filter: var(--initials-backdrop, none) !important;
+}
+
+/* Barra de categorías sticky */
+.gallery-theme section.sticky {
+  background: var(--categorybar-bg, rgba(255,255,255,0.90)) !important;
+  border-bottom-color: var(--categorybar-border, rgba(0,0,0,0.10)) !important;
+  box-shadow: var(--categorybar-shadow, none) !important;
+}
+.gallery-theme section.sticky ul li button {
+  color: var(--categorybar-link, rgba(0,0,0,.60)) !important;
+}
+.gallery-theme section.sticky ul li button[aria-current="page"] {
+  color: var(--categorybar-link-active, #000000) !important;
+}
+.gallery-theme section.sticky ul li button[aria-current="page"] span {
+  background: var(--categorybar-underline, #000000) !important;
+}
+
+/* Grid masonry (gap y auto-rows parametrizables) */
+.gallery-theme .grid-masonry {
+  gap: var(--grid-gap, 6px) !important;
+  grid-auto-rows: var(--grid-auto-rows, 1px) !important;
+}
+
+/* Tarjetas */
+.gallery-theme .grid-item {
+  border-radius: var(--card-radius, 0px) !important;
+  overflow: hidden;
+  box-shadow: var(--card-shadow, none) !important;
+}
+
+/* Lightbox / Slideshow */
+.gallery-theme .lightbox-media {
+  background: var(--lightbox-bg, #ffffff) !important;
+  border-radius: var(--lightbox-radius, 0px) !important;
+  box-shadow: var(--lightbox-shadow, none) !important;
+}
+
+/* ==========================================================================
+   PLANTILLAS
+   ========================================================================== */
+
+/* 1) Classic — igual a tu look actual (baseline) */
+.gallery-theme--classic {
+  /* mantiene los defaults */
+}
+
+/* 2) Minimal — look ultra limpio, overlay más tenue, subrayado fino */
+.gallery-theme--minimal {
+  --gallery-hero-overlay: rgba(0,0,0,.28);
+  --hero-image-blur: 4px;
+  --initials-border-color: rgba(255,255,255,.6);
+  --initials-border-width: 2px;
+
+  --categorybar-bg: rgba(255,255,255,.92);
+  --categorybar-border: rgba(0,0,0,.06);
+  --categorybar-shadow: 0 2px 10px rgba(0,0,0,.04);
+  --categorybar-link: rgba(0,0,0,.55);
+  --categorybar-link-active: #151515;
+  --categorybar-underline: #151515;
+
+  --grid-gap: 4px;
+  --card-radius: 6px;
+  --card-shadow: none;
+
+  --lightbox-radius: 8px;
+  --lightbox-shadow: 0 12px 40px rgba(0,0,0,.18);
+}
+
+/* 3) Elegant — serif editorial (inspirado en “fine art”) */
+.gallery-theme--elegant {
+  --gallery-hero-overlay: rgba(0,0,0,.38);
+  --hero-image-blur: 5px;
+  --initials-border-color: rgba(255,255,255,.70);
+  --initials-border-width: 3px;
+
+  --categorybar-bg: rgba(255,255,255,.94);
+  --categorybar-border: rgba(0,0,0,.08);
+  --categorybar-shadow: 0 10px 30px rgba(0,0,0,.06);
+  --categorybar-link: rgba(0,0,0,.60);
+  --categorybar-link-active: #111;
+  --categorybar-underline: #111;
+
+  --grid-gap: 8px;
+  --card-radius: 10px;
+  --card-shadow: 0 8px 28px rgba(0,0,0,.08);
+
+  --lightbox-radius: 10px;
+  --lightbox-shadow: 0 16px 60px rgba(0,0,0,.22);
+}
+
+/* Tipografía para Elegant: reasigna clases utilitarias existentes */
+.gallery-theme--elegant .font-raleway {
+  font-family: 'Playfair Display', Georgia, serif !important;
+  letter-spacing: .01em;
+}
+.gallery-theme--elegant .font-lato {
+  font-family: 'Lora', Georgia, serif !important;
+}
+
+/* 4) Modern — editorial contemporáneo, cards marcadas */
+.gallery-theme--modern {
+  --gallery-hero-overlay: rgba(0,0,0,.32);
+  --hero-image-blur: 3px;
+  --initials-border-color: rgba(255,255,255,.72);
+  --initials-border-width: 2.5px;
+
+  --categorybar-bg: rgba(255,255,255,.92);
+  --categorybar-border: rgba(0,0,0,.07);
+  --categorybar-shadow: 0 4px 18px rgba(0,0,0,.06);
+  --categorybar-link: rgba(0,0,0,.62);
+  --categorybar-link-active: #0d0d0d;
+  --categorybar-underline: #0d0d0d;
+
+  --grid-gap: 6px;
+  --card-radius: 12px;
+  --card-shadow: 0 10px 30px rgba(0,0,0,.10);
+
+  --lightbox-radius: 12px;
+  --lightbox-shadow: 0 20px 60px rgba(0,0,0,.22);
+}
+
+/* 5) Studio — enfoque de estudio: overlay más fuerte, grid respirado */
+.gallery-theme--studio {
+  --gallery-hero-overlay: rgba(0,0,0,.50);
+  --hero-image-blur: 4px;
+  --initials-border-color: rgba(255,255,255,.65);
+  --initials-border-width: 3px;
+
+  --categorybar-bg: rgba(255,255,255,.90);
+  --categorybar-border: rgba(0,0,0,.08);
+  --categorybar-shadow: 0 12px 35px rgba(0,0,0,.08);
+  --categorybar-link: rgba(0,0,0,.64);
+  --categorybar-link-active: #101010;
+  --categorybar-underline: #101010;
+
+  --grid-gap: 10px;
+  --card-radius: 8px;
+  --card-shadow: 0 8px 26px rgba(0,0,0,.12);
+
+  --lightbox-radius: 10px;
+  --lightbox-shadow: 0 18px 60px rgba(0,0,0,.24);
+}

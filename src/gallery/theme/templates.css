@@ -1,0 +1,255 @@
+/* Plantillas de galería (variables CSS)
+   Nota: ahora las variables coinciden con las que consumen los componentes
+   (HeroHeader, CategoryBar). Mantienen el look actual por defecto.
+*/
+
+/* === BASE / CLASSIC (equivalente a tu diseño actual) === */
+.gallery-theme {
+  /* HERO */
+  --hero-overlay: rgba(0,0,0,.45);
+  --gallery-hero-overlay: var(--hero-overlay); /* alias para HeroHeader */
+  --hero-image-filter: blur(6px);
+  --hero-image-opacity: 0.85;
+  --hero-image-transform: scale(1.05);
+
+  --hero-initials-bg: transparent;
+  --hero-initials-border: rgba(255,255,255,.55);
+  --hero-initials-border-width: 3px;
+  --hero-initials-shadow: 0 8px 30px rgba(0,0,0,.25);
+  --hero-initials-color: #fff;
+  --hero-initials-text-shadow: 0 2px 12px rgba(0,0,0,.45);
+
+  --hero-cta-bg: rgba(255,255,255,.20);
+  --hero-cta-bg-hover: rgba(255,255,255,.30);
+  --hero-cta-fg: #ffffff;
+  --hero-cta-border: rgba(255,255,255,.40);
+  --hero-cta-border-width: 1px;
+  --hero-cta-blur: none;
+
+  /* Aliases hacia variables usadas por componentes */
+  --gallery-hero-btn-bg: var(--hero-cta-bg);
+  --gallery-hero-btn-bg-hover: var(--hero-cta-bg-hover);
+  --gallery-hero-btn-text: var(--hero-cta-fg);
+  --gallery-hero-btn-border: var(--hero-cta-border);
+  --gallery-hero-circle-border: var(--hero-initials-border);
+
+  /* TOPBAR (barra inferior del hero) */
+  --topbar-bg: rgba(255,255,255,.85);
+  --topbar-blur: blur(8px);
+  --topbar-border: rgba(0,0,0,.10);
+  --topbar-title: inherit;
+  --topbar-subtitle: rgba(0,0,0,.6);
+  --topbar-icon: inherit;
+  --topbar-icon-bg: transparent;
+
+  /* Aliases topbar para HeroHeader */
+  --gallery-header-bg: var(--topbar-bg);
+  --gallery-header-border: var(--topbar-border);
+
+  /* CATEGORY BAR */
+  --catbar-bg: rgba(255,255,255,.90);
+  --catbar-border: rgba(0,0,0,.10);
+
+  /* Compatibilidad con nombres previos */
+  --cat-active: #000000;
+  --cat-inactive: rgba(0,0,0,.60);
+  --cat-active-underline: #000000;
+
+  /* Nuevos tokens consumidos por CategoryBar.jsx (con alias a los previos) */
+  --catbar-blur: blur(8px);
+  --catbar-item: var(--cat-inactive, rgba(0,0,0,.60));
+  --catbar-item-hover: var(--catbar-item);
+  --catbar-item-active: var(--cat-active, #000000);
+  --catbar-underline: transparent;
+  --catbar-underline-active: var(--cat-active-underline, currentColor);
+  --catbar-underline-height: 2px;
+
+  /* GRID (por si luego lo usamos) */
+  --grid-gap: 6px;
+  --grid-cols-mobile: 2;
+  --grid-cols-desktop: 4;
+
+  /* HERO DECOR (marcos/texturas) — por defecto oculto */
+  --hero-decor-display: none;                  /* ← requerido: oculto por defecto */
+  --hero-decor-inset: clamp(12px, 3vw, 28px);  /* margen interno del marco */
+  --hero-decor-border-width: 0px;
+  --hero-decor-border-color: transparent;
+  --hero-decor-radius: 0px;
+  --hero-decor-shadow: none;
+  --hero-decor-opacity: 1;
+  --hero-decor-blend: normal;
+  --hero-decor-bg: transparent;                /* fondo del marco (si aplica) */
+  --hero-decor-texture: none;                  /* textura sobrepuesta (grain, etc.) */
+  --hero-decor-texture-opacity: .25;
+  --hero-decor-texture-blend: overlay;
+  --hero-decor-z: 5;
+}
+
+/* === CLEAN: más luminoso y aireado === */
+.gallery-theme[data-template="clean"] {
+  --hero-overlay: rgba(0,0,0,.30);
+  --gallery-hero-overlay: var(--hero-overlay);
+  --hero-image-filter: blur(4px);
+  --hero-image-opacity: 0.92;
+  --hero-image-transform: scale(1.03);
+
+  --hero-initials-border: rgba(255,255,255,.70);
+  --hero-initials-shadow: 0 10px 28px rgba(0,0,0,.20);
+
+  --hero-cta-bg: rgba(255,255,255,.85);
+  --hero-cta-bg-hover: rgba(255,255,255,.95);
+  --hero-cta-fg: #111111;
+  --hero-cta-border: rgba(0,0,0,.08);
+
+  --topbar-bg: rgba(255,255,255,.92);
+  --topbar-blur: blur(8px);
+  --topbar-border: rgba(0,0,0,.06);
+  --topbar-subtitle: rgba(0,0,0,.55);
+
+  --catbar-bg: rgba(255,255,255,.95);
+  --catbar-border: rgba(0,0,0,.06);
+
+  /* Compatibilidad con nombres previos */
+  --cat-active: #111111;
+  --cat-inactive: rgba(0,0,0,.55);
+  --cat-active-underline: #111111;
+
+  /* Nuevos tokens CategoryBar */
+  --catbar-blur: blur(8px);
+  --catbar-item: var(--cat-inactive, rgba(0,0,0,.55));
+  --catbar-item-hover: var(--catbar-item);
+  --catbar-item-active: var(--cat-active, #111111);
+  --catbar-underline: transparent;
+  --catbar-underline-active: var(--cat-active-underline, currentColor);
+  --catbar-underline-height: 2px;
+
+  --grid-gap: 8px;
+  --grid-cols-mobile: 2;
+  --grid-cols-desktop: 4;
+}
+
+/* === OVERLAY: hero más dramático === */
+.gallery-theme[data-template="overlay"] {
+  --hero-overlay: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.35) 60%, rgba(0,0,0,.25) 100%);
+  --gallery-hero-overlay: var(--hero-overlay);
+  --hero-image-filter: blur(6px);
+  --hero-image-opacity: 0.88;
+  --hero-image-transform: scale(1.05);
+
+  --hero-initials-border: rgba(255,255,255,.65);
+
+  --hero-cta-bg: rgba(255,255,255,.18);
+  --hero-cta-bg-hover: rgba(255,255,255,.26);
+  --hero-cta-fg: #ffffff;
+  --hero-cta-border: rgba(255,255,255,.38);
+
+  --topbar-bg: rgba(255,255,255,.80);
+  --topbar-border: rgba(0,0,0,.10);
+  --topbar-subtitle: rgba(0,0,0,.62);
+
+  --catbar-bg: rgba(255,255,255,.90);
+  --catbar-border: rgba(0,0,0,.10);
+
+  /* Compatibilidad con nombres previos */
+  --cat-active: #000000;
+  --cat-inactive: rgba(0,0,0,.62);
+  --cat-active-underline: #000000;
+
+  /* Nuevos tokens CategoryBar */
+  --catbar-blur: blur(8px);
+  --catbar-item: var(--cat-inactive, rgba(0,0,0,.62));
+  --catbar-item-hover: var(--catbar-item);
+  --catbar-item-active: var(--cat-active, #000000);
+  --catbar-underline: transparent;
+  --catbar-underline-active: var(--cat-active-underline, currentColor);
+  --catbar-underline-height: 2px;
+
+  --grid-gap: 6px;
+  --grid-cols-mobile: 2;
+  --grid-cols-desktop: 4;
+}
+
+/* === Overrides opcionales del Grid por plantilla ===
+   Permite que la plantilla ajuste gap/columnas sin tocar React.
+   Los valores por defecto preservan el layout actual (2/4 col, gap 6/8).
+*/
+.gallery-theme .grid-masonry {
+  gap: var(--grid-gap, 6px) !important;
+  grid-template-columns: repeat(var(--grid-cols-mobile, 2), 1fr) !important;
+}
+@media (min-width: 1024px) {
+  .gallery-theme .grid-masonry {
+    grid-template-columns: repeat(var(--grid-cols-desktop, 4), 1fr) !important;
+  }
+}
+
+/* ===================== */
+/* HERO DECOR: estilos   */
+/* ===================== */
+.gallery-theme .hero-decor-frame {
+  display: var(--hero-decor-display, none);
+  position: absolute;
+  inset: var(--hero-decor-inset, clamp(12px, 3vw, 28px));
+  border: var(--hero-decor-border-width, 0px) solid var(--hero-decor-border-color, transparent);
+  border-radius: var(--hero-decor-radius, 0px);
+  box-shadow: var(--hero-decor-shadow, none);
+  background: var(--hero-decor-bg, transparent);
+  opacity: var(--hero-decor-opacity, 1);
+  mix-blend-mode: var(--hero-decor-blend, normal);
+  pointer-events: none;
+  z-index: var(--hero-decor-z, 5);
+}
+.gallery-theme .hero-decor-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--hero-decor-texture, none);
+  opacity: var(--hero-decor-texture-opacity, .25);
+  mix-blend-mode: var(--hero-decor-texture-blend, overlay);
+  pointer-events: none;
+}
+
+/* ============================ */
+/* PRESETS via data-hero-decor */
+/* ============================ */
+
+/* Marco fino rectangular */
+.gallery-theme[data-hero-decor="frame-thin"] {
+  --hero-decor-display: block;
+  --hero-decor-inset: clamp(10px, 2.5vw, 24px);
+  --hero-decor-border-width: 2px;
+  --hero-decor-border-color: rgba(255,255,255,.85);
+  --hero-decor-radius: 8px;
+  --hero-decor-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 6px 24px rgba(0,0,0,.18);
+  --hero-decor-texture: none;
+}
+
+/* Marco redondeado suave */
+.gallery-theme[data-hero-decor="frame-rounded"] {
+  --hero-decor-display: block;
+  --hero-decor-inset: clamp(12px, 3vw, 28px);
+  --hero-decor-border-width: 3px;
+  --hero-decor-border-color: rgba(255,255,255,.90);
+  --hero-decor-radius: 28px;
+  --hero-decor-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 8px 30px rgba(0,0,0,.22);
+  --hero-decor-texture: none;
+}
+
+/* Textura "grain" sutil full-bleed (sin borde) */
+.gallery-theme[data-hero-decor="grain"] {
+  --hero-decor-display: block;
+  --hero-decor-inset: 0px;
+  --hero-decor-border-width: 0px;
+  --hero-decor-border-color: transparent;
+  --hero-decor-radius: 0px;
+  --hero-decor-shadow: none;
+  /* patrón de ruido CSS ligero (fallback sin imágenes) */
+  --hero-decor-texture:
+    repeating-radial-gradient(circle at 10% 20%,
+      rgba(255,255,255,.06) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg,
+      rgba(0,0,0,.06) 0 1px, transparent 1px 3px);
+  --hero-decor-texture-opacity: .22;
+  --hero-decor-texture-blend: overlay;
+}

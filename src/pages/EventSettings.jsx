@@ -1,13 +1,29 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/pages/EventSettings.jsx
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Save, Trash2, Image, Video, Lock, Download, Eye, KeyRound, Hash, User, FileText } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, Image, Video, Lock, Download, Eye, KeyRound, Hash, User, FileText, MessageSquare, Upload, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import LoadingSpinner from '@/components/LoadingSpinner';
+
+// ⬇️ NUEVO: selector de plantilla
+import TemplateSelector from '@/components/settings/TemplateSelector';
+// ⬇️ NUEVO: panel de diseño (Cover/Color/Grid) con overrides por galería
+import DesignSettings from '@/components/settings/DesignSettings';
+
+// ⬇️ NUEVO: diálogo UI
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 
 const EventSettings = () => {
   const { eventId } = useParams();
@@ -28,17 +44,29 @@ const EventSettings = () => {
     galleryExpiryDate: null,
     downloadCode: '',
     downloadLimit: 10,
-    // ---- Claves puntuales para galería (sin editor de categorías) ----
-    requireGuestName: false,  // pedir nombre al invitado antes de subir (se usará en flujo de upload)
-    showFileName: false,      // mostrar nombre de archivo en visor (se usará en la galería)
+    requireGuestName: false,
+    showFileName: false,
+    allowGuestbook: false,
+    perUserUploadLimit: 20,
+    // ⬇️ NUEVO: plantilla por defecto (clásica)
+    galleryTemplate: 'classic',
+    // ⬇️ NUEVO: overrides de diseño por galería (Cover/CategoryBar/Grid/Topbar/Tipografía/etc.)
+    design: {},
   });
   const [loading, setLoading] = useState(true);
+
+  // ⬇️ NUEVO: portada del evento
+  const [coverUrl, setCoverUrl] = useState('');
+  const [isCoverDialogOpen, setIsCoverDialogOpen] = useState(false);
+  const [galleryImages, setGalleryImages] = useState([]);
+  const [isCoverUploading, setIsCoverUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('events')
-      .select('title, date, location, settings')
+      .select('title, date, location, settings, cover_image_url')
       .eq('id', eventId)
       .single();
 
@@ -53,6 +81,7 @@ const EventSettings = () => {
       });
       // Merge: conserva defaults locales y trae lo que ya exista en BD
       setSettings(prev => ({ ...prev, ...(data.settings || {}) }));
+      setCoverUrl(data.cover_image_url || '');
     }
     setLoading(false);
   }, [eventId, navigate]);
@@ -82,6 +111,8 @@ const EventSettings = () => {
         date: eventDetails.date,
         location: eventDetails.location,
         settings: settings,
+        // ⬇️ NUEVO: asegura persistir la portada si cambió
+        cover_image_url: coverUrl || null,
       })
       .eq('id', eventId);
 
@@ -111,6 +142,115 @@ const EventSettings = () => {
     }
   };
 
+  // ========= NUEVO: Vista previa de diseño (tpl=draft & d=base64(JSON)) =========
+  const handlePreviewDesign = () => {
+    try {
+      const payload = JSON.stringify(settings.design || {});
+      // base64 seguro para Unicode
+      const base64 = btoa(unescape(encodeURIComponent(payload)));
+      // Usa la ruta directa a la galería (sin /gallery)
+      const url = `/event/${eventId}?tpl=draft&d=${encodeURIComponent(base64)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.error('Error al preparar vista previa:', e);
+      toast({ title: 'No se pudo abrir la vista previa', variant: 'destructive' });
+    }
+  };
+
+  // ========= NUEVO: funciones para Portada =========
+  const openCoverDialog = async () => {
+    setIsCoverDialogOpen(true);
+    // carga rápida de imágenes existentes de la galería para seleccionar
+    try {
+      const { data, error } = await supabase
+        .from('uploads')
+        .select('id, file_url, web_url, type')
+        .eq('event_id', eventId)
+        .order('uploaded_at', { ascending: false })
+        .limit(60);
+
+      if (!error) {
+        const pics = (data || []).filter(u => u.type !== 'video');
+        setGalleryImages(pics);
+      }
+    } catch (e) {
+      // silencioso
+    }
+  };
+
+  const handlePickExistingCover = async (url) => {
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({ cover_image_url: url })
+        .eq('id', eventId);
+      if (error) throw error;
+      setCoverUrl(url);
+      setIsCoverDialogOpen(false);
+      toast({ title: 'Portada actualizada' });
+    } catch (e) {
+      toast({ title: 'No se pudo actualizar la portada', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleCoverFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Archivo no válido', description: 'Selecciona una imagen (JPG/PNG/WebP).', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setIsCoverUploading(true);
+      const safeName = file.name.replace(/\s+/g, '-').toLowerCase();
+      const path = `${eventId}/${Date.now()}-${safeName}`;
+
+      // ⬇️ Bucket sugerido: event-covers (créalo si no existe)
+      const { error: upErr } = await supabase
+        .storage
+        .from('event-covers')
+        .upload(path, file, { upsert: true, contentType: file.type });
+
+      if (upErr) throw upErr;
+
+      const { data: pub } = supabase.storage.from('event-covers').getPublicUrl(path);
+      const publicUrl = pub?.publicUrl;
+      if (!publicUrl) throw new Error('No se pudo obtener URL pública');
+
+      const { error: evErr } = await supabase
+        .from('events')
+        .update({ cover_image_url: publicUrl })
+        .eq('id', eventId);
+
+      if (evErr) throw evErr;
+
+      setCoverUrl(publicUrl);
+      setIsCoverDialogOpen(false);
+      toast({ title: 'Portada actualizada' });
+    } catch (err) {
+      toast({ title: 'Error al subir portada', description: err.message, variant: 'destructive' });
+    } finally {
+      setIsCoverUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const clearCover = async () => {
+    try {
+      const { error } = await supabase
+        .from('events')
+        .update({ cover_image_url: null })
+        .eq('id', eventId);
+      if (error) throw error;
+      setCoverUrl('');
+      toast({ title: 'Portada quitada' });
+    } catch (e) {
+      toast({ title: 'No se pudo quitar la portada', description: e.message, variant: 'destructive' });
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner />;
   }
@@ -127,6 +267,7 @@ const EventSettings = () => {
           </div>
 
           <div className="bg-white rounded-2xl p-8 border border-[#E6E3E0] shadow-sm space-y-8">
+            {/* Detalles generales */}
             <section>
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Detalles Generales</h2>
               <div className="space-y-4">
@@ -145,6 +286,38 @@ const EventSettings = () => {
               </div>
             </section>
 
+            {/* ⬇️ NUEVO: Portada del evento */}
+            <section>
+              <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Portada del evento</h2>
+              <div className="grid sm:grid-cols-[1fr_auto] gap-4 items-start">
+                <div className="aspect-video w-full rounded-xl overflow-hidden border border-[#E6E3E0] bg-[#F9F8F7] flex items-center justify-center">
+                  {coverUrl ? (
+                    <img src={coverUrl} alt="Portada del evento" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="text-[#5E5E5E] text-sm flex items-center gap-2">
+                      <Image className="w-5 h-5" /> No hay portada seleccionada
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button type="button" onClick={openCoverDialog} className="bg-[#9E7977] hover:bg-[#8a6866] text-white">
+                    <Upload className="w-4 h-4 mr-2" />
+                    Subir/Seleccionar
+                  </Button>
+                  {coverUrl && (
+                    <Button type="button" variant="outline" onClick={clearCover} className="border-[#E6E3E0] text-[#2D2D2D]">
+                      <X className="w-4 h-4 mr-2" />
+                      Quitar portada
+                    </Button>
+                  )}
+                  <p className="text-xs text-[#5E5E5E]">
+                    La portada se muestra de fondo en la cabecera de la galería. Puedes subir una imagen o elegir una ya subida.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Configuración de galería */}
             <section>
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Configuración de Galería</h2>
               <div className="space-y-4">
@@ -154,7 +327,17 @@ const EventSettings = () => {
                 <SettingSwitch id="allowGalleryView" label="Galería pública para invitados" icon={<Eye />} checked={settings.allowGalleryView} onCheckedChange={(val) => handleSettingChange('allowGalleryView', val)} />
                 <SettingSwitch id="allowDownloads" label="Permitir descargas individuales" icon={<Download />} checked={settings.allowDownloads} onCheckedChange={(val) => handleSettingChange('allowDownloads', val)} />
 
-                {/* Mantener switches útiles que no dependen del editor de categorías */}
+                {/* NUEVO: controlar "Dejar Mensaje" en la landing */}
+                <SettingSwitch
+                  id="allowGuestbook"
+                  label="Permitir 'Dejar Mensaje' en la landing"
+                  description="Muestra el botón para que los invitados dejen un mensaje."
+                  icon={<MessageSquare className="w-4 h-4" />}
+                  checked={!!settings.allowGuestbook}
+                  onCheckedChange={(v) => handleSettingChange('allowGuestbook', v)}
+                />
+
+                {/* Switches auxiliares */}
                 <SettingSwitch
                   id="requireGuestName"
                   label="Pedir nombre al invitado antes de subir"
@@ -171,9 +354,61 @@ const EventSettings = () => {
                   checked={!!settings.showFileName}
                   onCheckedChange={(v) => handleSettingChange('showFileName', v)}
                 />
+
+                {/* Límite de archivos por usuario */}
+                <div>
+                  <Label htmlFor="perUserUploadLimit" className="text-sm font-medium text-[#5E5E5E] mb-2 block">
+                    Límite de archivos por usuario
+                  </Label>
+                  <input
+                    id="perUserUploadLimit"
+                    type="number"
+                    min="1"
+                    value={settings.perUserUploadLimit ?? 20}
+                    onChange={(e) => handleSettingChange('perUserUploadLimit', parseInt(e.target.value, 10) || 1)}
+                    className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]"
+                    placeholder="20"
+                  />
+                </div>
               </div>
             </section>
 
+            {/* ⬇️ Selector de plantilla (con Probar/Aplicar) */}
+            <section>
+              <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Diseño de portada y galería</h2>
+              <TemplateSelector
+                value={settings.galleryTemplate || 'classic'}
+                onChange={(tplKey) => handleSettingChange('galleryTemplate', tplKey)}
+                eventId={eventId}
+              />
+            </section>
+
+            {/* ⬇️ Ajustes finos de diseño + Probar diseño */}
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-[#2D2D2D]">Ajustes de Diseño (Cover / CategoryBar / Grid / Topbar / Tipografía / Paleta / Focal)</h2>
+                {/* NUEVO botón Probar diseño */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-[#E6E3E0] text-[#2D2D2D]"
+                  onClick={handlePreviewDesign}
+                >
+                  Probar diseño
+                </Button>
+              </div>
+
+              <DesignSettings
+                value={settings.design || {}}
+                onChange={(next) => handleSettingChange('design', next)}
+              />
+
+              <p className="text-xs text-[#5E5E5E] mt-2">
+                “Probar diseño” abre una vista previa en la galería con <code>?tpl=draft</code> sin guardar aún los cambios.
+              </p>
+            </section>
+
+            {/* Descarga completa */}
             <section>
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Descarga Completa de Galería</h2>
               <div className="grid md:grid-cols-2 gap-4">
@@ -187,26 +422,9 @@ const EventSettings = () => {
                 </div>
               </div>
             </section>
-
-            <section>
-              <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Fechas de la Galería</h2>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="uploadStartDate" className="text-sm font-medium text-[#5E5E5E] mb-2 block">Inicio de subidas</Label>
-                  <input id="uploadStartDate" type="date" value={settings.uploadStartDate || ''} onChange={(e) => handleDateChange('uploadStartDate', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" />
-                </div>
-                <div>
-                  <Label htmlFor="uploadEndDate" className="text-sm font-medium text-[#5E5E5E] mb-2 block">Fin de subidas</Label>
-                  <input id="uploadEndDate" type="date" value={settings.uploadEndDate || ''} onChange={(e) => handleDateChange('uploadEndDate', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" />
-                </div>
-                <div>
-                  <Label htmlFor="galleryExpiryDate" className="text-sm font-medium text-[#5E5E5E] mb-2 block">Expiración de galería</Label>
-                  <input id="galleryExpiryDate" type="date" value={settings.galleryExpiryDate || ''} onChange={(e) => handleDateChange('galleryExpiryDate', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" />
-                </div>
-              </div>
-            </section>
           </div>
 
+          {/* Danger zone */}
           <div className="mt-8 bg-red-100/50 border border-red-500/30 rounded-2xl p-8">
             <h2 className="text-xl font-bold text-red-700">Zona de Peligro</h2>
             <p className="text-red-600 mt-2 mb-4">
@@ -231,6 +449,76 @@ const EventSettings = () => {
           </div>
         </div>
       </div>
+
+      {/* ⬇️ NUEVO: Diálogo para subir/seleccionar portada */}
+      <Dialog open={isCoverDialogOpen} onOpenChange={setIsCoverDialogOpen}>
+        <DialogContent className="sm:max-w-[720px] bg-white">
+          <DialogHeader>
+            <DialogTitle>Portada del evento</DialogTitle>
+            <DialogDescription>
+              Sube una imagen o selecciona una existente de la galería.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid md:grid-cols-[220px_1fr] gap-6">
+            {/* Columna izquierda: subir archivo */}
+            <div className="bg-[#F9F8F7] rounded-xl border border-[#E6E3E0] p-4">
+              <h4 className="font-semibold text-[#2D2D2D] mb-2">Subir imagen</h4>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleCoverFileChange}
+              />
+              <Button
+                type="button"
+                className="w-full bg-[#9E7977] hover:bg-[#8a6866] text-white"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isCoverUploading}
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                {isCoverUploading ? 'Subiendo...' : 'Elegir archivo'}
+              </Button>
+              <p className="text-xs text-[#5E5E5E] mt-2">
+                Formatos recomendados: JPG/PNG/WebP.
+              </p>
+            </div>
+
+            {/* Columna derecha: seleccionar existente */}
+            <div>
+              <h4 className="font-semibold text-[#2D2D2D] mb-2">Seleccionar desde subidas</h4>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 max-h-[300px] overflow-auto">
+                {galleryImages.length === 0 && (
+                  <div className="col-span-full text-sm text-[#5E5E5E]">
+                    No hay imágenes disponibles aún.
+                  </div>
+                )}
+                {galleryImages.map((u) => {
+                  const url = u.web_url || u.file_url;
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className="relative aspect-square rounded-lg overflow-hidden border border-[#E6E3E0] hover:ring-2 hover:ring-[#9E7977]"
+                      onClick={() => handlePickExistingCover(url)}
+                      title="Usar como portada"
+                    >
+                      <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" className="border-[#E6E3E0] text-[#2D2D2D]" onClick={() => setIsCoverDialogOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

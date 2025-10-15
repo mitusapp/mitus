@@ -42,7 +42,7 @@ const EventLanding = () => {
         .eq('id', eventId)
         .single();
 
-      if (error || !data) {
+    if (error || !data) {
         toast({
           title: 'Evento no encontrado',
           description: 'El evento que buscas no existe o ha expirado',
@@ -97,6 +97,7 @@ const EventLanding = () => {
     return true;
   };
 
+  // (Obsoleto para el flujo actual en la landing; se mantiene sin uso para no romper nada)
   const handleOpenPicker = () => {
     if (!ensureNameOrWarn()) return;
     if (!acceptStr) {
@@ -107,6 +108,7 @@ const EventLanding = () => {
     fileInputRef.current?.click();
   };
 
+  // (Obsoleto en el nuevo flujo; navegación ocurre sin preseleccionar archivos)
   const handleFilesChosen = (e) => {
     const files = Array.from(e.target?.files || []);
     if (!files.length) return;
@@ -122,9 +124,20 @@ const EventLanding = () => {
   const handleGuestAccess = (action) => {
     // Requerimos nombre solo si el host lo activó
     if (!ensureNameOrWarn()) return;
+
     if (action === 'upload') {
-      // Abrir picker inmediatamente (no navegar todavía)
-      handleOpenPicker();
+      // Nuevo comportamiento: NO abrir picker aquí; navegar a GuestUpload con modal de categorías
+      if (!allowPhoto && !allowVideo) {
+        toast({ title: 'Subida deshabilitada', description: 'Este evento no permite subir archivos.', variant: 'destructive' });
+        return;
+      }
+      navigate(`/event/${eventId}/upload`, {
+        state: {
+          guestName: (guestName || '').trim(),
+          openCategoryModal: true,
+          fromLanding: true,
+        },
+      });
       return;
     }
     navigate(`/event/${eventId}/${action}`);
@@ -232,8 +245,7 @@ const EventLanding = () => {
                 className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-transparent text-center"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    if ((actionParam || 'upload') === 'upload') handleOpenPicker();
-                    else handleGuestAccess(actionParam);
+                    handleGuestAccess(defaultAction);
                   }
                 }}
               />
@@ -250,14 +262,17 @@ const EventLanding = () => {
               Subir Fotos y Videos
             </Button>
 
-            <Button
-              onClick={() => handleGuestAccess('guestbook')}
-              variant="outline"
-              className="w-full border-gray-300 text-white hover:bg-gray-400 py-4 text-lg rounded-xl"
-            >
-              <MessageSquare className="w-5 h-5 mr-2" />
-              Dejar Mensaje
-            </Button>
+            {/* Mostrar "Dejar Mensaje" solo si está habilitado en settings */}
+            {event?.settings?.allowGuestbook && (
+              <Button
+                onClick={() => handleGuestAccess('guestbook')}
+                variant="outline"
+                className="w-full border-gray-300 text-white hover:bg-gray-400 py-4 text-lg rounded-xl"
+              >
+                <MessageSquare className="w-5 h-5 mr-2" />
+                Dejar Mensaje
+              </Button>
+            )}
 
             {event.settings?.allowGalleryView && (
               <Button
@@ -273,7 +288,7 @@ const EventLanding = () => {
         </motion.div>
       </div>
 
-      {/* input file oculto para picker inmediato */}
+      {/* input file oculto para picker inmediato (ya no se usa en este flujo) */}
       <input
         ref={fileInputRef}
         type="file"

@@ -1,11 +1,7 @@
 // src/pages/EventGallery.jsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-  ArrowLeft, ArrowRight, ChevronDown, Download, Pause, Play, Share2, X,
-  Image as ImageIcon, Video as VideoIcon, KeyRound
-} from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -17,17 +13,36 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
-const DEFAULT_CATEGORY = 'Más momentos';
+import HeroHeader from '@/components/gallery/HeroHeader';
+import CategoryBar from '@/components/gallery/CategoryBar';
+import ImageGrid from '@/components/gallery/ImageGrid';
+import LightboxModal from '@/components/gallery/LightboxModal';
+import SlideshowModal from '@/components/gallery/SlideshowModal';
+
+// ⬇️ Provider de plantillas (no altera el look por defecto)
+import { GalleryThemeProvider } from '@/gallery/theme';
+// ⬇️ variables CSS de plantillas
+import '@/gallery/theme/templates.css';
+
+// Canon por defecto (soportamos mayúsculas/nuevas categorías y las antiguas)
+const DEFAULT_CATEGORY = 'MÁS MOMENTOS';
 const CATEGORY_ORDER = [
-  'Preparación',
-  'Ceremonia',
-  'Retratos',
-  'Protocolo',
-  'Familia & Amigos',
-  'Recepción',
-  'Fiesta',
-  'Detalles & Decoración',
+  'DESTACADO',
+  'PREPARACIÓN',
+  'PRIMERA VISTA',
+  'CEREMONIA',
+  'RETRATOS',
+  'PROTOCOLO',
+  'FAMILIA',
+  'AMIGOS',
+  'FAMILIA & AMIGOS', // compatibilidad con galerías antiguas
+  'RECEPCIÓN',
+  'LA FIESTA',
+  'DETALLES & DECORACIÓN',
+  DEFAULT_CATEGORY,
 ];
+
+const MOSTRAR_TODO = 'MOSTRAR TODO';
 
 const isLandscapeViewport = () => window.innerWidth >= window.innerHeight;
 
@@ -38,7 +53,23 @@ const getInitials = (name) => {
   return name[0].toUpperCase();
 };
 
-// Carga dimensiones reales de una imagen
+// Normaliza nombres de categoría a un canon único (mayúsculas, tildes y alias)
+const canonicalCategory = (val) => {
+  let t = String(val || '').trim();
+  if (!t) return DEFAULT_CATEGORY;
+  t = t.replace(/\s*&\s*/g, ' & ').replace(/\s+/g, ' ');
+  let up = t.toLocaleUpperCase('es-ES');
+
+  // Alias y equivalencias
+  if (up === 'FIESTA') up = 'LA FIESTA';
+  if (up === 'DETALLES & DECORACION') up = 'DETALLES & DECORACIÓN';
+  if (up === 'MAS MOMENTOS') up = DEFAULT_CATEGORY;
+  if (up === 'MÁS  MOMENTOS' || up === 'MÁS MOMENTO') up = DEFAULT_CATEGORY;
+
+  return up || DEFAULT_CATEGORY;
+};
+
+// Carga dimensiones reales de una imagen (para masonry)
 const loadImageSize = (src) =>
   new Promise((resolve) => {
     const img = new Image();
@@ -47,32 +78,60 @@ const loadImageSize = (src) =>
     img.src = src;
   });
 
-const normalizeCategory = (u) => (u.category || DEFAULT_CATEGORY).trim();
-const slug = (t) => t.toLowerCase().replace(/[^a-z0-9áéíóúñü\s-]/gi, '').replace(/\s+/g, '-');
-
-// Derivar categorías presentes, respetando el orden solicitado; extras alfabéticas y "Más momentos" al final.
-const useOrderedCategories = (uploads) => useMemo(() => {
-  const present = new Set();
-  uploads.forEach(u => present.add(normalizeCategory(u)));
-
-  const inOrder = CATEGORY_ORDER.filter(c => present.has(c));
-  const extras = Array.from(present).filter(c => !CATEGORY_ORDER.includes(c) && c !== DEFAULT_CATEGORY)
-    .sort((a,b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-  const tail = present.has(DEFAULT_CATEGORY) ? [DEFAULT_CATEGORY] : [];
-  return [...inOrder, ...extras, ...tail];
-}, [uploads]);
+// Decodifica ?d=<base64 json> en overrides
+function decodeDesignOverrides(search) {
+  try {
+    const q = new URLSearchParams(search);
+    const d = q.get('d');
+    if (!d) return null;
+    // Base64 URL-safe → estándar
+    const b64 = d.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    const json = atob(b64 + pad);
+    return JSON.parse(json);
+  } catch {
+    try {
+      // fallback: por si viene como JSON URI-encoded
+      const q = new URLSearchParams(search);
+      const raw = q.get('d');
+      return raw ? JSON.parse(decodeURIComponent(raw)) : null;
+    } catch {
+      return null;
+    }
+  }
+}
 
 const EventGallery = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // ⬇️ Vista previa por ?tpl=
+  // - classic/clean/overlay/... → usar esa plantilla
+  // - draft → usar la plantilla guardada (no pasar "draft" al provider)
+  const previewTemplate = useMemo(() => {
+    const q = new URLSearchParams(location.search);
+    const tpl = q.get('tpl');
+    if (!tpl) return null;
+    const key = String(tpl).toLowerCase();
+    return key === 'draft' ? null : key;
+  }, [location.search]);
+
+  // ⬇️ Overrides por URL (?d=base64json). Prioridad: URL > BD.
+  const urlOverrides = useMemo(() => decodeDesignOverrides(location.search) || {}, [location.search]);
 
   const [event, setEvent] = useState(null);
   const [uploads, setUploads] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [activeCategory, setActiveCategory] = useState(DEFAULT_CATEGORY);
-  const [selectedMediaIndex, setSelectedMediaIndex] = useState(null);
-  const [isSlideshow, setIsSlideshow] = useState(false);
+  // Filtro por categoría (MOSTRAR TODO por defecto)
+  const [activeCategory, setActiveCategory] = useState(MOSTRAR_TODO);
+
+  // Viewer (clic en imagen)
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+  // Slideshow (botón play o desde space en viewer)
+  const [slideshowIndex, setSlideshowIndex] = useState(null);
 
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [downloadCode, setDownloadCode] = useState('');
@@ -85,18 +144,15 @@ const EventGallery = () => {
   const [stickyShadow, setStickyShadow] = useState(false);
   const stickySentinelRef = useRef(null);
 
-  // Ref para anclas por categoría
-  const anchorRefs = useRef({});
+  // Referencias para layout grid
+  const gridWrapperRef = useRef(null);
 
-  // Referencia para devolver el foco al cerrar el visor
+  // Referencia para devolver el foco al cerrar los modales
   const lastActiveElRef = useRef(null);
   const closeBtnRef = useRef(null);
 
-  // === GRID MASONRY: contenedor y funciones de layout ===
-  const gridWrapperRef = useRef(null);
-
+  // === GRID MASONRY: funciones de layout ===
   const relayoutCard = useCallback((cardEl) => {
-    // Usar el grid .grid-masonry más cercano (soporta múltiples grids)
     const gridEl = cardEl?.closest?.('.grid-masonry');
     if (!gridEl) return;
 
@@ -109,7 +165,6 @@ const EventGallery = () => {
 
     const cardWidth = cardEl.clientWidth;
 
-    // Preferir dimensiones intrínsecas proporcionadas (data-w/h)
     const dw = parseFloat(mediaEl.getAttribute('data-w'));
     const dh = parseFloat(mediaEl.getAttribute('data-h'));
     let height = 0;
@@ -120,7 +175,6 @@ const EventGallery = () => {
     } else if (mediaEl.tagName === 'VIDEO' && mediaEl.videoWidth && mediaEl.videoHeight) {
       height = (cardWidth * mediaEl.videoHeight) / mediaEl.videoWidth;
     } else {
-      // Fallback post-layout
       height = mediaEl.offsetHeight || Math.ceil(mediaEl.getBoundingClientRect().height);
     }
 
@@ -138,7 +192,6 @@ const EventGallery = () => {
   useEffect(() => {
     if (!gridWrapperRef.current) return;
     const ro = new ResizeObserver(() => {
-      // Recalcular spans si cambia el ancho (número de columnas)
       relayoutAll();
     });
     ro.observe(gridWrapperRef.current);
@@ -188,7 +241,7 @@ const EventGallery = () => {
 
       if (uploadsError) throw uploadsError;
 
-      setUploads((uploadsData || []).map(u => ({ ...u, _cat: normalizeCategory(u) })));
+      setUploads(uploadsData || []);
     } catch (error) {
       console.error('Error fetching gallery data:', error);
       toast({
@@ -203,41 +256,92 @@ const EventGallery = () => {
 
   useEffect(() => { fetchEventData(); }, [fetchEventData]);
 
-  // === ORDEN GLOBAL: categoría (orden fijo) y luego nombre de archivo (natural A→Z) ===
-  const sortedUploads = useMemo(() => {
+  // Filtrar por moderación (si está activa, solo aprobados)
+  const moderatedUploads = useMemo(() => {
+    const req = !!(event?.settings?.requireModeration);
+    return req ? (uploads || []).filter(u => u.approved) : (uploads || []);
+  }, [uploads, event?.settings?.requireModeration]);
+
+  // Normalizar categorías y ordenar globalmente por orden de categoría + nombre
+  const normalizedSorted = useMemo(() => {
+    const withCat = moderatedUploads.map(u => ({ ...u, _cat: canonicalCategory(u.category || DEFAULT_CATEGORY) }));
     const orderIndex = (cat) => {
       const i = CATEGORY_ORDER.indexOf(cat);
-      if (i !== -1) return i;
-      if (cat === DEFAULT_CATEGORY) return 10_000;
-      return 9_000 + cat.localeCompare('zzzz', 'es');
+      return i === -1 ? 9_000 : i;
     };
     const nameOf = (u) =>
       (u.file_name || u.title || (u.file_url?.split('/')?.pop()?.split('?')[0]) || '')
         .toLocaleLowerCase('es');
-
-    return [...uploads].sort((a, b) => {
+    return [...withCat].sort((a, b) => {
       const ca = orderIndex(a._cat), cb = orderIndex(b._cat);
       if (ca !== cb) return ca - cb;
       const n = nameOf(a).localeCompare(nameOf(b), 'es', { numeric: true, sensitivity: 'base' });
       if (n !== 0) return n;
       return String(a.id).localeCompare(String(b.id));
     });
-  }, [uploads]);
+  }, [moderatedUploads]);
 
-  // Re-layout cuando cambie el dataset
+  // Categorías presentes (orden respetando CATEGORY_ORDER). Usamos dataset moderado.
+  const categoriesPresent = useMemo(() => {
+    const present = new Set(normalizedSorted.map(u => u._cat));
+    const ordered = CATEGORY_ORDER.filter(c => present.has(c));
+    return ordered;
+  }, [normalizedSorted]);
+
+  // Mostrar barra de categorías SOLO si hay 2 o más categorías
+  const showCategoryBar = categoriesPresent.length >= 2;
+
+  // Cambiar selección: MOSTRAR TODO o una categoría en específico
+  const barItems = useMemo(() => {
+    return showCategoryBar ? [MOSTRAR_TODO, ...categoriesPresent] : [];
+  }, [showCategoryBar, categoriesPresent]);
+
+  // Items visibles según el filtro activo
+  const filteredByCategory = useMemo(() => {
+    if (activeCategory === MOSTRAR_TODO || !showCategoryBar) return normalizedSorted;
+    return normalizedSorted.filter(u => u._cat === activeCategory);
+  }, [normalizedSorted, activeCategory, showCategoryBar]);
+
+  // Deduplicar fotos por clave base; videos siempre pasan
+  const displayItems = useMemo(() => {
+    const baseKey = (u) => {
+      const raw = (u.file_name || u.web_url || u.file_url || '').toLowerCase();
+      const last = raw.split('/').pop()?.split('?')[0] || '';  // nombre.ext
+      const stem = last.replace(/\.[a-z0-9]+$/i, '');          // nombre sin extensión
+      return stem
+        .replace(/@(?:2|3)x|-\d{2,4}w|-\d{2,4}h|_\d{2,4}x\d{2,4}/g, '')
+        .replace(/(?:^|[_-])(web|webp|mobile|thumb|sm|md|lg|xl|orig(?:inal)?|full|hires)(?:[_-]\d+)?$/,'');
+    };
+    const seen = new Set();
+    return filteredByCategory
+      .filter(u => u.type === 'video' || !!u.web_url)
+      .filter(u => {
+        if (u.type === 'video') return true;
+        const k = baseKey(u);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+  }, [filteredByCategory]);
+
+  // Re-layout cuando cambie el dataset visible
   useEffect(() => {
     const t = setTimeout(relayoutAll, 0);
     return () => clearTimeout(t);
-  }, [sortedUploads, relayoutAll]);
+  }, [displayItems, relayoutAll]);
 
-  // Selección de portada mejorada por orientación (no bloqueante)
+  // Portada: prioriza cover_image_url si existe; si no, heurística por orientación
   const pickCoverAsync = useCallback(async (allUploads) => {
-    if (!allUploads?.length) return event?.cover_image_url || null;
+    // ✅ Priorizar portada fija si está configurada
+    if (event?.cover_image_url) return event.cover_image_url;
+
+    // Sin portada fija → intentar heurística con subidas
+    if (!allUploads?.length) return null;
 
     const wantLandscape = isLandscapeViewport();
     const images = allUploads.filter(u => u.type !== 'video');
-    const candidates = images.length ? images : allUploads; // si no hay fotos, usar videos (mostrar primer frame)
-    if (!candidates.length) return event?.cover_image_url || null;
+    const candidates = images.length ? images : allUploads;
+    if (!candidates.length) return null;
 
     for (let i = 0; i < Math.min(candidates.length, 12); i++) {
       const u = candidates[i];
@@ -250,17 +354,18 @@ const EventGallery = () => {
         }
       }
     }
-    return (images[0]?.web_url || images[0]?.file_url || event?.cover_image_url || candidates[0]?.web_url || candidates[0]?.file_url || null);
+    const first = images[0] || candidates[0];
+    return (first?.web_url || first?.file_url || null);
   }, [event?.cover_image_url]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const chosen = await pickCoverAsync(sortedUploads);
+      const chosen = await pickCoverAsync(normalizedSorted);
       if (!cancelled) setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0');
     })();
     return () => { cancelled = true; };
-  }, [sortedUploads, pickCoverAsync]);
+  }, [normalizedSorted, pickCoverAsync]);
 
   // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
@@ -274,49 +379,18 @@ const EventGallery = () => {
     return () => io.disconnect();
   }, []);
 
-  const categories = useOrderedCategories(sortedUploads);
-
-  // Mapa auxiliar: id -> índice en el arreglo global (para abrir visor correctamente)
-  const indexById = useMemo(() => {
-    const m = {};
-    sortedUploads.forEach((u, i) => { m[u.id] = i; });
-    return m;
-  }, [sortedUploads]);
-
-  // Actualiza categoría activa según scroll (intersección de anclas)
-  useEffect(() => {
-    const anchors = categories.map(c => anchorRefs.current[slug(c)]).filter(Boolean);
-    if (!anchors.length) return;
-    const io = new IntersectionObserver(entries => {
-      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio);
-      if (visible[0]) {
-        const id = visible[0].target.getAttribute('data-cat');
-        if (id && id !== activeCategory) setActiveCategory(id);
-      }
-    }, { root: null, threshold: [0, 0.25, 0.5, 0.75, 1], rootMargin: '0px 0px -70% 0px' });
-    anchors.forEach(a => io.observe(a));
-    return () => io.disconnect();
-  }, [categories]);
-
-  const scrollToCategory = (cat) => {
-    const ref = anchorRefs.current[slug(cat)];
-    if (ref) ref.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    setActiveCategory(cat);
-  };
-
+  // Acciones
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
     toast({ title: 'Enlace copiado al portapapeles' });
   };
 
   const openSlideshow = () => {
-    if (sortedUploads.length === 0) {
+    if (displayItems.length === 0) {
       toast({ title: 'Galería vacía', description: 'No hay imágenes para el slideshow.' });
       return;
     }
-    const startAt = Math.max(0, sortedUploads.findIndex(u => normalizeCategory(u) === activeCategory));
-    setSelectedMediaIndex(startAt === -1 ? 0 : startAt);
-    setIsSlideshow(true);
+    setSlideshowIndex(0);
   };
 
   const handleDownloadRequest = () => {
@@ -347,7 +421,7 @@ const EventGallery = () => {
     toast({ title: 'Preparando descarga...', description: 'Esto puede tardar unos minutos.' });
 
     const zip = new JSZip();
-    for (const upload of sortedUploads) {
+    for (const upload of normalizedSorted) {
       try {
         const response = await fetch(upload.file_url); // ORIGINAL para ZIP
         const blob = await response.blob();
@@ -378,439 +452,216 @@ const EventGallery = () => {
   const hostsText = event?.invitation_details?.hosts?.join(' & ') || event?.title || '';
   const initials = getInitials(hostsText);
 
+  // ⬇️ Merge final de overrides: BD + URL (URL tiene prioridad)
+  const effectiveOverrides = useMemo(() => {
+    const base = (event?.settings?.design) || {};
+    return { ...base, ...urlOverrides };
+  }, [event?.settings?.design, urlOverrides]);
+
+  // ⬇️ Carga dinámica de Google Fonts si la tipografía base lo requiere
+  useEffect(() => {
+    const familyBase = effectiveOverrides['font-family-base'];
+    if (!familyBase) return;
+
+    // extrae la primera familia, p.ej. "'Inter', system-ui, ..." -> Inter
+    const primary = String(familyBase).split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+    const FONT_URLS = {
+      Inter: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
+      Montserrat: 'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap',
+      'Playfair Display': 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap',
+      'DM Serif Display': 'https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap',
+      // Lato y Raleway ya se importan en el <style> inline
+    };
+    const href = FONT_URLS[primary];
+    if (!href) return;
+
+    const id = `gf-base-${primary.replace(/\s+/g, '-').toLowerCase()}`;
+    if (document.getElementById(id)) return;
+
+    const link = document.createElement('link');
+    link.id = id;
+    link.rel = 'stylesheet';
+    link.href = href;
+    document.head.appendChild(link);
+  }, [effectiveOverrides]);
+
   if (loading) {
     return <LoadingSpinner />;
   }
 
   return (
-    <div className="bg-white text-[#1E1E1E] min-h-screen">
-      <style>
-        {`
-          @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@600;700&family=Lato:wght@300;400;500&display=swap');
-          .font-raleway{font-family:'Raleway',sans-serif;}
-          .font-lato{font-family:'Lato',sans-serif;}
-
-          /* === Masonry por filas con CSS Grid === */
-          .grid-masonry { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; grid-auto-rows: 1px; grid-auto-flow: row; }
-          .grid-item { position: relative; box-sizing: border-box; }
-          .grid-masonry img,
-          .grid-masonry video { display: block; width: 100%; height: 100%; vertical-align: bottom; }
-          @media (min-width: 1024px) { .grid-masonry { grid-template-columns: repeat(4, 1fr); gap: 6px; grid-auto-rows: 1px; } }
-
-          /* Altura exacta de pantalla */
-          .hero-grid { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; height: 100vh; }
-          @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
-          @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
-
-          .hero-bg { position: relative; overflow: hidden; }
-          .hero-bg img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.05); transition: filter .5s ease, opacity .4s ease; filter: blur(6px); opacity: .85; }
-          .hero-bg img.loaded { filter: blur(0); opacity: 1; }
-
-          .hero-overlay { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
-          .initials-circle { width: clamp(120px, 22vw, 200px); height: clamp(120px, 22vw, 200px); border-radius: 9999px; display: flex; align-items: center; justify-content: center; background: transparent; backdrop-filter: none; border: 3px solid rgba(255,255,255,.55); box-shadow: 0 8px 30px rgba(0,0,0,.25); }
-          .initials-circle span{ font-family: 'Lato', sans-serif; font-weight: 800; font-size: clamp(28px, 6vw, 48px); color: #fff; letter-spacing: .04em; white-space: nowrap; text-shadow: 0 2px 12px rgba(0,0,0,.45); }
-          .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
-
-          @keyframes nudge { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(4px); opacity: 1; } 100% { transform: translateY(0); opacity: .9; } }
-          .chevron-anim { animation: nudge 1.6s ease-in-out infinite; }
-        `}
-      </style>
-
-      <section className="hero-grid">
-        <div className="hero-bg">
-          <img
-            src={coverUrl}
-            alt="Portada del evento"
-            decoding="async"
-            fetchpriority="high"
-            className={heroLoaded ? 'loaded' : ''}
-            onLoad={() => setHeroLoaded(true)}
-          />
-          <div className="hero-overlay" />
-          {hostsText && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none" aria-label={`Iniciales de ${hostsText}`}>
-              <div className="initials-circle font-lato">
-                <span>{initials}</span>
-              </div>
-            </div>
-          )}
-          <div className="absolute z-10 bottom-6 left-0 right-0 flex justify-center">
-            <Button
-              onClick={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })}
-              className="bg-white/20 hover:bg-white/30 border border-white/40 text-white rounded-full px-6 py-5"
-              aria-label="Saltar a la galería"
-            >
-              Ver galería <ChevronDown className="w-5 h-5 ml-2 chevron-anim" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="z-20 bg-white/85 backdrop-blur border-t border-black/10">
-          <div className="max-w-[1400px] mx-auto px-4">
-            <div className="flex items-center justify-between py-4">
-              <div className="text-left">
-                <div className="flex items-baseline gap-3">
-                  <span className="font-raleway text-xl md:text-2xl">
-                    {event?.invitation_details?.hosts?.join(' & ') || event?.title}
-                  </span>
-                </div>
-                {eventDate && (
-                  <div className="pt-1 text-xs md:text-sm text-black/60">
-                    {event?.title} — {eventDate.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  </div>
-                )}
-              </div>
-              <nav className="flex items-center gap-2">
-                <Button
-                  variant="ghost" size="icon"
-                  className="rounded-full hover:bg-black/5"
-                  onClick={handleDownloadRequest}
-                  aria-label="Descargar galería completa"
-                >
-                  <Download className="w-5 h-5" />
-                </Button>
-                <Button
-                  variant="ghost" size="icon"
-                  className="rounded-full hover:bg-black/5"
-                  onClick={handleShare}
-                  aria-label="Compartir enlace de la galería"
-                >
-                  <Share2 className="w-5 h-5" />
-                </Button>
-                <Button
-                  variant="ghost" size="icon"
-                  className="rounded-full hover:bg-black/5"
-                  onClick={openSlideshow}
-                  aria-label="Reproducir presentación"
-                >
-                  <Play className="w-5 h-5" />
-                </Button>
-              </nav>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Sentinel para detectar sticky activo */}
-      <div ref={stickySentinelRef} />
-
-      <section className={`sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10 ${stickyShadow ? 'shadow-sm' : ''}`}>
-        <div className="max-w-[1400px] mx-auto px-4">
-          <div className="w-full overflow-x-auto">
-            <ul className="flex gap-6 text-sm md:text-base font-lato">
-              {categories.map(cat => (
-                <li key={cat}>
-                  <button
-                    onClick={() => scrollToCategory(cat)}
-                    className={`relative py-3 inline-block ${cat === activeCategory ? 'text-black' : 'text-black/60 hover:text-black'}`}
-                    aria-current={cat === activeCategory ? 'page' : undefined}
-                    aria-label={`Ir a categoría ${cat}`}
-                  >
-                    {cat}
-                    <span className={`absolute left-0 right-0 bottom-0 h-[2px] ${cat === activeCategory ? 'bg-black' : 'bg-transparent'}`} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <div id="gallery-start" />
-      <main>
-        <section className="w-full px-2 sm:px-3 lg:px-4 py-6 lg:py-10" ref={gridWrapperRef}>
-          {/* Grid ÚNICO: todos los archivos dentro para continuidad del gap */}
-          <div className="grid-masonry">
-            {(() => {
-              // Deduplicar solo fotos por clave base; videos siempre pasan
-              const baseKey = (u) => {
-                const raw = (u.file_name || u.web_url || u.file_url || '').toLowerCase();
-                const last = raw.split('/').pop().split('?')[0];        // nombre.ext
-                const stem = last.replace(/\.[a-z0-9]+$/i, '');         // nombre sin extensión
-                return stem
-                  .replace(/@(?:2|3)x|-\d{2,4}w|-\d{2,4}h|_\d{2,4}x\d{2,4}/g, '')
-                  .replace(/(?:^|[_-])(web|webp|mobile|thumb|sm|md|lg|xl|orig(?:inal)?|full|hires)(?:[_-]\d+)?$/,'');
-              };
-              const seen = new Set();
-              const displayItems = sortedUploads
-                .filter(u => u.type === 'video' || !!u.web_url)
-                .filter(u => {
-                  if (u.type === 'video') return true;
-                  const k = baseKey(u);
-                  if (seen.has(k)) return false;
-                  seen.add(k);
-                  return true;
-                });
-
-              return displayItems.map((upload) => {
-                const isVideo = upload.type === 'video';
-                const mediaUrl = isVideo ? upload.file_url : upload.web_url; // SOLO web para fotos
-
-                return (
-                  <motion.div
-                    key={upload.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.35 }}
-                    className="grid-item cursor-pointer relative"
-                    onClick={() => {
-                      lastActiveElRef.current = document.activeElement;
-                      setSelectedMediaIndex(indexById[upload.id]); // visor como el original
-                    }}
-                    title={upload.title || ''}
-                  >
-                    {isVideo ? (
-                      <div className="relative bg-black">
-                        <video
-                          src={mediaUrl}
-                          className="w-full h-auto"
-                          playsInline
-                          muted
-                          data-media
-                          onLoadedMetadata={(e) => onImageReady(e.currentTarget)}
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <VideoIcon className="w-10 h-10 text-white/90" />
-                        </div>
-                      </div>
-                    ) : (
-                      <img
-                        src={mediaUrl}
-                        alt={upload.title || 'Foto del evento'}
-                        className="w-full h-auto select-none"
-                        loading="lazy"
-                        decoding="async"
-                        data-media
-                        onLoad={(e) => onImageReady(e.currentTarget)}
-                      />
-                    )}
-                  </motion.div>
-                );
-              });
-            })()}
-          </div>
-
-          {sortedUploads.length === 0 && (
-            <div className="text-center py-20">
-              <ImageIcon className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-2xl font-semibold">Galería vacía</h3>
-              <p className="text-gray-600 mt-2">No hay fotos o videos en esta categoría.</p>
-            </div>
-          )}
-        </section>
-      </main>
-
-      <footer className="text-center py-10 border-t border-black/5">
-        <p className="text-xs text-black/60">Powered by Mitus</p>
-      </footer>
-
-      <AnimatePresence>
-        {selectedMediaIndex !== null && (
-          <MediaViewer
-            event={event}
-            uploads={sortedUploads}
-            startIndex={selectedMediaIndex}
-            onClose={() => {
-              setSelectedMediaIndex(null);
-              setIsSlideshow(false);
-              if (lastActiveElRef.current && lastActiveElRef.current.focus) {
-                try { lastActiveElRef.current.focus(); } catch {}
-              }
-            }}
-            isSlideshow={isSlideshow}
-            setIsSlideshow={setIsSlideshow}
-            closeBtnRef={closeBtnRef}
-          />
-        )}
-      </AnimatePresence>
-
-      <Dialog open={isDownloadModalOpen} onOpenChange={setIsDownloadModalOpen}>
-        <DialogContent className="sm:max-w-[425px] bg-white">
-          <DialogHeader>
-            <DialogTitle className="flex items-center"><KeyRound className="w-5 h-5 mr-2 text-black" /> Descargar galería completa</DialogTitle>
-            <DialogDescription>Ingresa el código de descarga proporcionado por el anfitrión para descargar todos los archivos en un solo ZIP.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="download-code" className="text-right">Código</Label>
-              <input id="download-code" value={downloadCode} onChange={(e) => setDownloadCode(e.target.value)} className="col-span-3 p-2 border rounded-md" placeholder="XXXXXX" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button onClick={handleConfirmDownload} disabled={isDownloading} className="bg-black text-white hover:bg-black/80">{isDownloading ? 'Descargando...' : 'Confirmar y descargar'}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-};
-
-const MediaViewer = ({ event, uploads, startIndex, onClose, isSlideshow, setIsSlideshow, closeBtnRef }) => {
-  const [currentIndex, setCurrentIndex] = useState(startIndex);
-  const [isPlaying, setIsPlaying] = useState(isSlideshow);
-
-  // Swipe en móviles
-  const touchStart = useRef({ x: 0, y: 0 });
-  const onTouchStart = (e) => {
-    const t = e.touches?.[0];
-    if (!t) return;
-    touchStart.current = { x: t.clientX, y: t.clientY };
-  };
-  const onTouchEnd = (e) => {
-    const t = e.changedTouches?.[0];
-    if (!t) return;
-    const dx = t.clientX - touchStart.current.x;
-    const dy = t.clientY - touchStart.current.y;
-    const absX = Math.abs(dx), absY = Math.abs(dy);
-    if (absX > 50 && absX > absY) {
-      if (dx < 0) goToNext(); else goToPrev();
-    }
-  };
-
-  // Prefetch next/prev para imágenes
-  useEffect(() => {
-    const preload = (i) => {
-      const u = uploads[i];
-      if (!u || u.type === 'video') return;
-      const img = new Image();
-      img.src = (u.web_url || u.file_url);
-    };
-    preload((currentIndex + 1) % uploads.length);
-    preload((currentIndex - 1 + uploads.length) % uploads.length);
-  }, [currentIndex, uploads]);
-
-  const goToNext = useCallback(() => setCurrentIndex(prev => (prev + 1) % uploads.length), [uploads.length]);
-  const goToPrev = useCallback(() => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length), [uploads.length]);
-
-  useEffect(() => {
-    let slideshowInterval;
-    if (isPlaying && isSlideshow) slideshowInterval = setInterval(goToNext, 3000);
-    return () => clearInterval(slideshowInterval);
-  }, [isPlaying, isSlideshow, goToNext]);
-
-  // Accesibilidad: key bindings y foco inicial
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-      else if (e.key === 'ArrowRight') { e.preventDefault(); goToNext(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); goToPrev(); }
-      else if (e.key === ' ') { e.preventDefault(); setIsPlaying(p => !p); setIsSlideshow(true); }
-    };
-    window.addEventListener('keydown', onKey);
-    closeBtnRef?.current?.focus?.();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [goToNext, goToPrev, onClose, setIsSlideshow, closeBtnRef]);
-
-  const currentMedia = uploads[currentIndex];
-  if (!currentMedia) return null;
-
-  const handleDownload = (e) => {
-    e.stopPropagation();
-    if (!event?.settings?.allowDownloads) {
-      toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
-      return;
-    }
-    window.open(currentMedia.file_url, '_blank'); // ORIGINAL al descargar
-  };
-
-  const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
-  const displayName = currentMedia.file_name || currentMedia.title || (currentMedia.file_url ? currentMedia.file_url.split('/').pop().split('?')[0] : '');
-
-  return (
-    <motion.div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Visor de imágenes"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
-      onClick={onClose}
+    <GalleryThemeProvider
+      template={previewTemplate ?? event?.settings?.galleryTemplate}
+      overrides={effectiveOverrides}
     >
-      {/* Anuncio de estado (accesibilidad) */}
-      <div className="sr-only" aria-live="polite">
-        {`Mostrando elemento ${currentIndex + 1} de ${uploads.length}`}
-      </div>
+      <div className="bg-white text-[#1E1E1E] min-h-screen">
+        <style>
+          {`
+            @import url('https://fonts.googleapis.com/css2?family=Raleway:wght@600;700&family=Lato:wght@300;400;500&display=swap');
+            .font-raleway{font-family:'Raleway',sans-serif;}
+            .font-lato{font-family:'Lato',sans-serif;}
 
-      <div className="absolute top-0 right-0 p-4 flex items-center gap-2 z-10">
-        {isSlideshow && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-black hover:bg-black/10 rounded-full"
-            onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying); }}
-            aria-label={isPlaying ? 'Pausar presentación' : 'Reproducir presentación'}
-          >
-            {isPlaying ? <Pause /> : <Play />}
-          </Button>
-        )}
-        {event?.settings?.allowDownloads && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-black hover:bg-black/10 rounded-full"
-            onClick={handleDownload}
-            aria-label="Descargar archivo actual"
-          >
-            <Download />
-          </Button>
-        )}
-        <Button
-          ref={closeBtnRef}
-          variant="ghost"
-          size="icon"
-          className="text-black hover:bg-black/10 rounded-full"
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          aria-label="Cerrar visor"
-        >
-          <X />
-        </Button>
-      </div>
+            /* Tipografía base (no invasivo) */
+            .gallery-theme {
+              font-size: var(--font-size-base, 16px);
+              font-family: var(--font-family-base, 'Lato', sans-serif);
+            }
 
-      <div className="relative w-full h-full flex items-center justify-center" onClick={(e) => e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="hidden sm:inline-flex absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
-          onClick={goToPrev}
-          aria-label="Anterior"
-        >
-          <ArrowLeft />
-        </Button>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentIndex}
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.25 }}
-            className="flex items-center justify-center"
-          >
-            {currentMedia.type === 'video'
-              ? <video src={mediaUrl} controls autoPlay className="lightbox-media" />
-              : <img src={mediaUrl} alt={currentMedia.title || 'Foto del evento'} className="lightbox-media" decoding="async" />}
-          </motion.div>
+            /* === Masonry por filas con CSS Grid ===
+               NOTA: columnas y gap los impone templates.css con !important */
+            .grid-masonry {
+              display: grid;
+              grid-auto-rows: 1px;
+              grid-auto-flow: row;
+            }
+            .grid-item { position: relative; box-sizing: border-box; }
+            .grid-masonry img,
+            .grid-masonry video { display: block; width: 100%; height: 100%; vertical-align: bottom; }
+
+            /* Altura exacta de pantalla */
+            .hero-grid { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; height: 100vh; }
+            @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
+            @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
+
+            .hero-bg { position: relative; overflow: hidden; }
+            .hero-bg img {
+              width: 100%; height: 100%; object-fit: cover;
+              /* Set Focal (x/y en %) */
+              object-position: var(--hero-focal-x, 50%) var(--hero-focal-y, 50%);
+              transform: scale(1.05);
+              transition: filter .5s ease, opacity .4s ease; filter: blur(6px); opacity: .85;
+            }
+            .hero-bg img.loaded { filter: blur(0); opacity: 1; }
+
+            /* Overlay con alias hacia --hero-overlay */
+            .hero-overlay {
+              position: absolute; inset: 0;
+              background: var(--gallery-hero-overlay, var(--hero-overlay, rgba(0,0,0,.45)));
+            }
+
+            /* Borde del círculo con alias hacia --hero-initials-border */
+            .initials-circle {
+              width: clamp(120px, 22vw, 200px); height: clamp(120px, 22vw, 200px);
+              border-radius: 9999px; display: flex; align-items: center; justify-content: center;
+              background: transparent; backdrop-filter: none;
+              border: 3px solid var(--gallery-hero-circle-border, var(--hero-initials-border, rgba(255,255,255,.55)));
+              box-shadow: 0 8px 30px rgba(0,0,0,.25);
+            }
+            .initials-circle span{
+              font-family: 'Lato', sans-serif; font-weight: 800;
+              font-size: clamp(28px, 6vw, 48px); color: #fff; letter-spacing: .04em; white-space: nowrap;
+              text-shadow: 0 2px 12px rgba(0,0,0,.45);
+            }
+
+            .lightbox-media { max-width: 100vw; max-height: 100vh; width: auto; height: auto; object-fit: contain; }
+
+            @keyframes nudge { 0% { transform: translateY(0); opacity: .9; } 50% { transform: translateY(4px); opacity: 1; } 100% { transform: translateY(0); opacity: .9; } }
+            .chevron-anim { animation: nudge 1.6s ease-in-out infinite; }
+          `}
+        </style>
+
+        <HeroHeader
+          coverUrl={coverUrl}
+          heroLoaded={heroLoaded}
+          setHeroLoaded={setHeroLoaded}
+          hostsText={hostsText}
+          initials={initials}
+          eventTitle={event?.title}
+          eventDate={eventDate}
+          onScrollToGallery={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })}
+          onDownloadRequest={handleDownloadRequest}
+          onShare={handleShare}
+          onOpenSlideshow={openSlideshow}
+        />
+
+        {/* Sentinel para detectar sticky activo */}
+        <div ref={stickySentinelRef} />
+
+        {/* Barra de categorías */}
+        <CategoryBar
+          show={showCategoryBar}
+          stickyShadow={stickyShadow}
+          items={barItems}
+          active={activeCategory}
+          onChange={setActiveCategory}
+        />
+
+        <div id="gallery-start" />
+
+        {/* Lista de imágenes (grid) */}
+        <ImageGrid
+          displayItems={displayItems}
+          onItemClick={(index) => {
+            lastActiveElRef.current = document.activeElement;
+            setLightboxIndex(index);
+          }}
+          onImageReady={onImageReady}
+          gridWrapperRef={gridWrapperRef}
+        />
+
+        <footer className="text-center py-10 border-t border-black/5">
+          <p className="text-xs text-black/60">Powered by Mitus</p>
+        </footer>
+
+        {/* Modales */}
+        <AnimatePresence>
+          {lightboxIndex !== null && (
+            <LightboxModal
+              event={event}
+              uploads={displayItems}
+              startIndex={lightboxIndex}
+              onClose={() => {
+                setLightboxIndex(null);
+                if (lastActiveElRef.current && lastActiveElRef.current.focus) {
+                  try { lastActiveElRef.current.focus(); } catch {}
+                }
+              }}
+              closeBtnRef={closeBtnRef}
+              onRequestSlideshow={(idx) => {
+                setLightboxIndex(null);
+                setSlideshowIndex(idx ?? 0);
+              }}
+            />
+          )}
         </AnimatePresence>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="hidden sm:inline-flex absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
-          onClick={goToNext}
-          aria-label="Siguiente"
-        >
-          <ArrowRight />
-        </Button>
 
-        {/* Nombre del archivo (parte inferior) */}
-        {(event?.settings?.showFileName ?? false) && displayName && (
-          <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
-            <div className="px-3 py-1 rounded-md text-sm text-black/60 bg-white/70 backdrop-blur-sm">
-              {displayName}
+        <AnimatePresence>
+          {slideshowIndex !== null && (
+            <SlideshowModal
+              event={event}
+              uploads={displayItems}
+              startIndex={slideshowIndex}
+              onClose={() => {
+                setSlideshowIndex(null);
+                if (lastActiveElRef.current && lastActiveElRef.current.focus) {
+                  try { lastActiveElRef.current.focus(); } catch {}
+                }
+              }}
+              closeBtnRef={closeBtnRef}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Modal de descarga por código */}
+        <Dialog open={isDownloadModalOpen} onOpenChange={setIsDownloadModalOpen}>
+          <DialogContent className="sm:max-w-[425px] bg-white">
+            <DialogHeader>
+              <DialogTitle className="flex items-center"> Descargar galería completa</DialogTitle>
+              <DialogDescription>Ingresa el código de descarga proporcionado por el anfitrión para descargar todos los archivos en un solo ZIP.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="download-code" className="text-right">Código</Label>
+                <input id="download-code" value={downloadCode} onChange={(e) => setDownloadCode(e.target.value)} className="col-span-3 p-2 border rounded-md" placeholder="XXXXXX" />
+              </div>
             </div>
-          </div>
-        )}
+            <DialogFooter>
+              <Button onClick={handleConfirmDownload} disabled={isDownloading} className="bg-black text-white hover:bg-black/80">{isDownloading ? 'Descargando...' : 'Confirmar y descargar'}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
-    </motion.div>
+    </GalleryThemeProvider>
   );
 };
 

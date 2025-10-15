@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, User as UserIcon, ArrowLeft, Calendar, Edit3 } from 'lucide-react';
+import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, User as UserIcon, ArrowLeft, Calendar, Edit3, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 // === Utilidades para portada (referencia ProfilePage) ===
 const EVENT_TYPE_LABELS = {
@@ -55,6 +57,14 @@ const HostDashboard = () => {
     estimatedTotal: 0,
     actualTotal: 0,
   });
+
+  // --- NUEVO: modal "Nueva galería" con presets
+  const [createOpen, setCreateOpen] = useState(false);
+  const [presets, setPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState(''); // '' = sin preset (defaults)
+  const [newTitle, setNewTitle] = useState('');
+  const [newDate, setNewDate] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const fetchPlannerSummary = useCallback(async () => {
     try {
@@ -127,6 +137,30 @@ const HostDashboard = () => {
     fetchPlannerSummary();
   }, [fetchPlannerSummary]);
 
+  // Cargar presets del usuario al abrir el modal (RLS filtra por user_id)
+  useEffect(() => {
+    const loadPresets = async () => {
+      if (!createOpen) return;
+      try {
+        const { data, error } = await supabase
+          .from('gallery_style_presets')
+          .select('id, name, template_key, tokens, flags, is_default, created_at')
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+        setPresets(data || []);
+        // autoseleccionar default si lo hay
+        const def = (data || []).find(p => p.is_default);
+        setSelectedPresetId(def ? def.id : '');
+      } catch (e) {
+        console.error(e);
+        toast({ title: 'No se pudieron cargar tus presets', variant: 'destructive' });
+      }
+    };
+    loadPresets();
+  }, [createOpen]);
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -165,6 +199,78 @@ const HostDashboard = () => {
     toast({ title: '¡Enlace copiado!' });
   };
 
+  // Defaults del sistema (mismos que EventSettings)
+  const defaultSettings = () => ({
+    allowPhotoUpload: true,
+    allowVideoUpload: true,
+    requireModeration: false,
+    allowGalleryView: true,
+    allowDownloads: false,
+    uploadStartDate: null,
+    uploadEndDate: null,
+    galleryExpiryDate: null,
+    downloadCode: '',
+    downloadLimit: 10,
+    requireGuestName: false,
+    showFileName: false,
+    allowGuestbook: false,
+    perUserUploadLimit: 20,
+    galleryTemplate: 'classic',
+    design: {},
+  });
+
+  // Construye settings a partir del preset elegido
+  const buildSettingsFromPreset = (preset) => {
+    const base = defaultSettings();
+    if (!preset) return base;
+    const next = { ...base };
+    if (preset.template_key) next.galleryTemplate = preset.template_key;
+    if (preset.tokens && typeof preset.tokens === 'object') next.design = preset.tokens;
+    if (preset.flags && typeof preset.flags === 'object') {
+      Object.assign(next, preset.flags);
+    }
+    return next;
+  };
+
+  const handleCreateGallery = async () => {
+    if (!newTitle?.trim()) {
+      toast({ title: 'Ponle un título a tu nueva galería', variant: 'destructive' });
+      return;
+    }
+    setCreating(true);
+    try {
+      const preset = presets.find(p => p.id === selectedPresetId) || null;
+      const settings = buildSettingsFromPreset(preset);
+
+      const payload = {
+        title: newTitle.trim(),
+        date: newDate || null,
+        location: '',
+        settings,
+      };
+
+      const { data, error } = await supabase
+        .from('events')
+        .insert([payload])
+        .select('id')
+        .single();
+
+      if (error) throw error;
+
+      toast({ title: 'Nueva galería creada', description: preset ? `Aplicado preset: ${preset.name}` : 'Usando valores por defecto' });
+      setCreateOpen(false);
+      setNewTitle('');
+      setNewDate('');
+      setSelectedPresetId('');
+      navigate(`/host/${data.id}`);
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'No se pudo crear la galería', description: e.message, variant: 'destructive' });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   // === Derivados para portada compacta (no modifica lógicas) ===
   const hosts = Array.isArray(event?.invitation_details?.hosts) && event.invitation_details.hosts.length
     ? event.invitation_details.hosts.join(' y ')
@@ -191,11 +297,19 @@ const HostDashboard = () => {
             </div>
           </div>
           <div className="flex gap-2">
+            {/* NUEVO: Nueva galería */}
+            <Button
+              onClick={() => setCreateOpen(true)}
+              className="!bg-[#6B5CC8] hover:!bg-[#5748b8] text-white"
+            >
+              <Plus className="w-4 h-4 mr-2" /> Nueva galería
+            </Button>
+
             {/* NUEVO: Editar (solo ícono) */}
             <Button
               variant="outline"
               onClick={() => navigate(`/wizard?edit=${eventId}`)}
-              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8]"
+              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8] hidden sm:inline-flex"
               aria-label="Editar"
             >
               <Edit3 className="w-4 h-4" />
@@ -204,7 +318,7 @@ const HostDashboard = () => {
             <Button
               variant="outline"
               onClick={() => navigate(`/host/${eventId}/settings`)}
-              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8]"
+              className="!bg-white dark:!bg-white !text-[#2D2D2D] !border-[#E6E3E0] hover:!bg-[#F8F8F8] hidden sm:inline-flex"
             >
               <Settings className="w-4 h-4" />
             </Button>
@@ -354,6 +468,66 @@ const HostDashboard = () => {
           </ActionCard>
         </div>
       </div>
+
+      {/* Modal: Nueva galería */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-[520px] bg-white">
+          <DialogHeader>
+            <DialogTitle>Nueva galería</DialogTitle>
+            <DialogDescription>Elige un preset (opcional) y define los datos básicos.</DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-2">
+            <div>
+              <Label className="text-sm text-[#5E5E5E] mb-1 block">Preset</Label>
+              <select
+                className="w-full p-2 border rounded-md bg-white"
+                value={selectedPresetId}
+                onChange={(e) => setSelectedPresetId(e.target.value)}
+              >
+                <option value="">— Sin preset (valores por defecto) —</option>
+                {presets.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.is_default ? '⭐ ' : ''}{p.name} ({p.template_key})
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-[#5E5E5E] mt-1">
+                Si eliges un preset, aplicaremos su <em>template</em>, tokens y banderas (descargas, privacidad, etc.).
+              </p>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <Label className="text-sm text-[#5E5E5E] mb-1 block">Título</Label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Ej. Boda Ana & Luis"
+                  className="w-full p-2 border rounded-md"
+                />
+              </div>
+              <div>
+                <Label className="text-sm text-[#5E5E5E] mb-1 block">Fecha</Label>
+                <input
+                  type="date"
+                  value={newDate}
+                  onChange={(e) => setNewDate(e.target.value)}
+                  className="w-full p-2 border rounded-md"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" className="border-[#E6E3E0] text-[#2D2D2D]" onClick={() => setCreateOpen(false)}>Cancelar</Button>
+            <Button onClick={handleCreateGallery} disabled={creating} className="bg-[#6B5CC8] hover:bg-[#5748b8] text-white">
+              {creating ? 'Creando…' : 'Crear'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
