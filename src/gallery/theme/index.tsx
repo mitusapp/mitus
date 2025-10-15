@@ -7,7 +7,7 @@ export type GalleryTemplateKey = 'classic' | 'minimal' | 'elegant';
 export interface GalleryTemplate {
   key: GalleryTemplateKey;
   name: string;
-  vars: Vars;        // CSS custom properties (sin el prefijo --)
+  vars: Vars;        // CSS custom properties)
   meta?: {
     // espacio para descripciones, badges, etc.
     description?: string;
