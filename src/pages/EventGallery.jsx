@@ -519,21 +519,17 @@ const EventGallery = () => {
             .grid-masonry video { display: block; width: 100%; height: 100%; vertical-align: bottom; }
 
             /* Altura estable del hero */
-            .hero-grid { display: grid; grid-template-rows: 1fr; min-height: 100vh; height: 100vh; }
-            /* Prefiere el viewport “grande” (estable) si existe */
-            @supports (height: 100lvh) { .hero-grid { min-height: 100lvh; height: 100lvh; } }
-            /* Si no hay lvh, usa dvh (también estable en presencia de UI) */
+            .hero-grid { display: grid; grid-template-rows: 1fr; min-height: 100vh; height: 100vh; overflow: visible; }
+            @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
             @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
-            
-            /* El primer hijo llena la fila */
-            .hero-grid > .hero-bg { height: 100%; }
+            .hero-grid > .hero-bg { height: 100%; /* opcional: min-height: - height: 100%; */ }
 
             .hero-bg { position: relative; overflow: hidden; }
             .hero-bg img {
               width: 100%; height: 100%; object-fit: cover;
               /* Set Focal (x/y en %) */
               object-position: var(--hero-focal-x, 50%) var(--hero-focal-y, 50%);
-              transform: scale(1.02);
+              transform: scale(1.05);
               transition: filter .5s ease, opacity .4s ease; filter: blur(6px); opacity: .85;
             }
             .hero-bg img.loaded { filter: blur(0); opacity: 1; }
