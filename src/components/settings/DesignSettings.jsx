@@ -181,7 +181,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
   const pxNum = (v, d = 0) => {
     const n = parseInt(String(v || '').replace('px', ''), 10);
     return Number.isFinite(n) ? n : d;
-    };
+  };
   const pctNum = (v, d = 100) => {
     const n = parseInt(String(v || '').replace('%', ''), 10);
     return Number.isFinite(n) ? n : d;
@@ -191,6 +191,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
   const decorDisplay = (form['hero-decor-display'] || 'none').trim();
   const decorInsetPx = pxNum(form['hero-decor-inset'], 24);
   const decorBorderPx = pxNum(form['hero-decor-border-width'], 2);
+  const decorRadiusPx = pxNum(form['hero-decor-radius'], 0);
   const decorOpacityPct = Math.round((parseFloat(form['hero-decor-opacity'] ?? '1') || 1) * 100);
   const decorTextureOpacityPct = Math.round((parseFloat(form['hero-decor-texture-opacity'] ?? '.25') || 0.25) * 100);
   const decorTexture = form['hero-decor-texture'] || '';
@@ -460,7 +461,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['hero-overlay','hero-image-filter','hero-heading-mode','hero-title-x','hero-title-y','hero-title-size'])}
+            onClick={() => delKeys(['hero-overlay', 'hero-image-filter', 'hero-heading-mode', 'hero-title-x', 'hero-title-y', 'hero-title-size'])}
           >
             Restaurar Cover
           </Button>
@@ -544,6 +545,24 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
             />
             <div className="text-xs text-[#5E5E5E]">{decorInsetPx}px</div>
           </div>
+        </div>
+
+        {/* Radio de esquinas */}
+        <div className="grid sm:grid-cols-3 gap-4 items-end mt-4">
+          <div>
+            <label className="block text-xs text-[#5E5E5E] mb-1">Radio de esquinas (px)</label>
+            <input
+              type="range"
+              min={0}
+              max={64}
+              value={decorRadiusPx}
+              onChange={(e) => setKey('hero-decor-radius', `${Math.max(0, parseInt(e.target.value, 10) || 0)}px`)}
+              className="w-full"
+            />
+            <div className="text-xs text-[#5E5E5E]">{decorRadiusPx}px</div>
+          </div>
+          <div />
+          <div />
         </div>
 
         {/* Textura: opacidad + rotación (best-effort) */}
@@ -726,7 +745,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['topbar-bg','topbar-border','topbar-blur','topbar-title','topbar-subtitle','topbar-icon','topbar-icon-bg'])}
+            onClick={() => delKeys(['topbar-bg', 'topbar-border', 'topbar-blur', 'topbar-title', 'topbar-subtitle', 'topbar-icon', 'topbar-icon-bg'])}
           >
             Restaurar Topbar
           </Button>
@@ -879,10 +898,10 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
         </div>
 
         <div className="grid sm:grid-cols-4 gap-4">
-          <Swatch label="Fondo"      value={paletteBg}    onChange={(v) => setKey('color-bg', v)} />
-          <Swatch label="Texto"      value={paletteText}  onChange={(v) => setKey('color-fg', v)} />
-          <Swatch label="Muted"      value={paletteMuted} onChange={(v) => setKey('color-muted', v)} />
-          <Swatch label="Acento"     value={paletteAccent}onChange={(v) => setKey('color-accent', v)} />
+          <Swatch label="Fondo" value={paletteBg} onChange={(v) => setKey('color-bg', v)} />
+          <Swatch label="Texto" value={paletteText} onChange={(v) => setKey('color-fg', v)} />
+          <Swatch label="Muted" value={paletteMuted} onChange={(v) => setKey('color-muted', v)} />
+          <Swatch label="Acento" value={paletteAccent} onChange={(v) => setKey('color-accent', v)} />
         </div>
 
         <div className="mt-3">
@@ -890,7 +909,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['color-bg','color-fg','color-muted','color-accent'])}
+            onClick={() => delKeys(['color-bg', 'color-fg', 'color-muted', 'color-accent'])}
           >
             Restaurar Paleta
           </Button>
@@ -1001,7 +1020,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['hero-focal-x','hero-focal-y'])}
+            onClick={() => delKeys(['hero-focal-x', 'hero-focal-y'])}
           >
             Restaurar Focal
           </Button>

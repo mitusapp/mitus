@@ -208,7 +208,7 @@ const EventGallery = () => {
         if (mediaEl?.tagName === 'IMG' && 'decode' in mediaEl) {
           await mediaEl.decode();
         }
-      } catch {}
+      } catch { }
       if (!mediaEl) return;
       const card = mediaEl.closest?.('.grid-item');
       if (!card) return;
@@ -310,7 +310,7 @@ const EventGallery = () => {
       const stem = last.replace(/\.[a-z0-9]+$/i, '');          // nombre sin extensión
       return stem
         .replace(/@(?:2|3)x|-\d{2,4}w|-\d{2,4}h|_\d{2,4}x\d{2,4}/g, '')
-        .replace(/(?:^|[_-])(web|webp|mobile|thumb|sm|md|lg|xl|orig(?:inal)?|full|hires)(?:[_-]\d+)?$/,'');
+        .replace(/(?:^|[_-])(web|webp|mobile|thumb|sm|md|lg|xl|orig(?:inal)?|full|hires)(?:[_-]\d+)?$/, '');
     };
     const seen = new Set();
     return filteredByCategory
@@ -519,9 +519,10 @@ const EventGallery = () => {
             .grid-masonry video { display: block; width: 100%; height: 100%; vertical-align: bottom; }
 
             /* Altura exacta de pantalla */
-            .hero-grid { display: grid; grid-template-rows: 1fr auto; min-height: 100vh; height: 100vh; }
+            .hero-grid { display: grid; grid-template-rows: 1fr; min-height: 100vh; height: 100vh; overflow: visible; }
             @supports (height: 100svh) { .hero-grid { min-height: 100svh; height: 100svh; } }
             @supports (height: 100dvh) { .hero-grid { min-height: 100dvh; height: 100dvh; } }
+            .hero-grid > .hero-bg { height: 100%; /* opcional: min-height: - height: 100%; */ }
 
             .hero-bg { position: relative; overflow: hidden; }
             .hero-bg img {
@@ -568,7 +569,11 @@ const EventGallery = () => {
           initials={initials}
           eventTitle={event?.title}
           eventDate={eventDate}
-          onScrollToGallery={() => document.getElementById('gallery-start')?.scrollIntoView({ behavior: 'smooth' })}
+          onScrollToGallery={() => {
+            const el = document.getElementById('topbar-start') || document.getElementById('gallery-start');
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }}
+
           onDownloadRequest={handleDownloadRequest}
           onShare={handleShare}
           onOpenSlideshow={openSlideshow}
@@ -613,7 +618,7 @@ const EventGallery = () => {
               onClose={() => {
                 setLightboxIndex(null);
                 if (lastActiveElRef.current && lastActiveElRef.current.focus) {
-                  try { lastActiveElRef.current.focus(); } catch {}
+                  try { lastActiveElRef.current.focus(); } catch { }
                 }
               }}
               closeBtnRef={closeBtnRef}
@@ -634,7 +639,7 @@ const EventGallery = () => {
               onClose={() => {
                 setSlideshowIndex(null);
                 if (lastActiveElRef.current && lastActiveElRef.current.focus) {
-                  try { lastActiveElRef.current.focus(); } catch {}
+                  try { lastActiveElRef.current.focus(); } catch { }
                 }
               }}
               closeBtnRef={closeBtnRef}
