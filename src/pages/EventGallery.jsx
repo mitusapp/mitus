@@ -66,12 +66,6 @@ const MIN_FIELDS = [
   'thumb_url', 'thumb_width', 'thumb_height', 'thumb_size'
 ].join(',');
 
-// === Registrar Service Worker (cache de imágenes) ===
-if ('serviceWorker' in navigator) {
-  // No rompe si ya está registrado
-  navigator.serviceWorker.register('/sw-mitus.js').catch(() => { });
-}
-
 
 // Canon por defecto (soportamos mayúsculas/nuevas categorías y las antiguas)
 const DEFAULT_CATEGORY = 'MÁS MOMENTOS';

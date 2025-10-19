@@ -65,8 +65,21 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
       toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
       return;
     }
-    window.open(currentMedia.file_url, '_blank'); // ORIGINAL al descargar
+
+    const url = currentMedia.file_url || currentMedia.web_url || currentMedia.thumb_url;
+    if (!url) {
+      toast({ title: 'No hay archivo disponible para descargar', variant: 'destructive' });
+      return;
+    }
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (currentMedia.file_name || currentMedia.title || 'mitus-foto.webp').replace(/\s+/g, '-');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
+
 
   const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
   const displayName = currentMedia.file_name || currentMedia.title || (currentMedia.file_url ? currentMedia.file_url.split('/').pop().split('?')[0] : '');

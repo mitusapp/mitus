@@ -41,8 +41,15 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
     }
   }, [currentIndex, uploads]);
 
-  const goToNext = useCallback(() => setCurrentIndex(prev => (prev + 1) ^ 0 % uploads.length), [uploads.length]);
-  const goToPrev = useCallback(() => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length), [uploads.length]);
+  // ✅ Corrección: usar % (no XOR) para ciclar correctamente
+  const goToNext = useCallback(
+    () => setCurrentIndex(prev => (prev + 1) % uploads.length),
+    [uploads.length]
+  );
+  const goToPrev = useCallback(
+    () => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length),
+    [uploads.length]
+  );
 
   useEffect(() => {
     let slideshowInterval;
@@ -66,17 +73,36 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
   const currentMedia = uploads[currentIndex];
   if (!currentMedia) return null;
 
+  // ✅ Descarga: caer a web_url/thumb_url si no hay file_url
   const handleDownload = (e) => {
     e.stopPropagation();
     if (!event?.settings?.allowDownloads) {
       toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
       return;
     }
-    window.open(currentMedia.file_url, '_blank'); // ORIGINAL al descargar
+    const url = currentMedia.file_url || currentMedia.web_url || currentMedia.thumb_url;
+    if (!url) {
+      toast({ title: 'No hay archivo disponible para descargar', variant: 'destructive' });
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (currentMedia.file_name || currentMedia.title || 'mitus-foto.webp').replace(/\s+/g, '-');
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
-  const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
-  const displayName = currentMedia.file_name || currentMedia.title || (currentMedia.file_url ? currentMedia.file_url.split('/').pop().split('?')[0] : '');
+  const mediaUrl = currentMedia.type === 'video'
+    ? currentMedia.file_url
+    : (currentMedia.web_url || currentMedia.file_url);
+
+  const displayName =
+    currentMedia.file_name ||
+    currentMedia.title ||
+    ((currentMedia.file_url || currentMedia.web_url || currentMedia.thumb_url || '')
+      .split('/').pop().split('?')[0]);
 
   return (
     <AnimatePresence>
