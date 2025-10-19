@@ -24,6 +24,55 @@ import { GalleryThemeProvider } from '@/gallery/theme';
 // ⬇️ variables CSS de plantillas
 import '@/gallery/theme/templates.css';
 
+// === IndexedDB cache (metadatos de uploads) ===
+const uploadsCache = (() => {
+  let dbPromise;
+  const DB = 'mitus-cache';
+  const STORE = 'uploadsByEvent';
+  const open = () =>
+    dbPromise ||
+    (dbPromise = new Promise((res, rej) => {
+      const req = indexedDB.open(DB, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    }));
+  const get = async (key) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const rq = tx.objectStore(STORE).get(key);
+      rq.onsuccess = () => res(rq.result || null);
+      rq.onerror = () => rej(rq.error);
+    });
+  };
+  const set = async (key, val) => {
+    const db = await open();
+    return new Promise((res, rej) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const rq = tx.objectStore(STORE).put(val, key);
+      rq.onsuccess = () => res();
+      rq.onerror = () => rej(rq.error);
+    });
+  };
+  return { get, set };
+})();
+
+// === Campos mínimos y paginación ===
+const PAGE_SIZE = 90;
+const MIN_FIELDS = [
+  'id', 'type', 'category', 'approved', 'uploaded_at', 'file_name',
+  'web_url', 'web_width', 'web_height', 'web_size',
+  'thumb_url', 'thumb_width', 'thumb_height', 'thumb_size'
+].join(',');
+
+// === Registrar Service Worker (cache de imágenes) ===
+if ('serviceWorker' in navigator) {
+  // No rompe si ya está registrado
+  navigator.serviceWorker.register('/sw-mitus.js').catch(() => { });
+}
+
+
 // Canon por defecto (soportamos mayúsculas/nuevas categorías y las antiguas)
 const DEFAULT_CATEGORY = 'MÁS MOMENTOS';
 const CATEGORY_ORDER = [
@@ -140,6 +189,14 @@ const EventGallery = () => {
   const [coverUrl, setCoverUrl] = useState(null);
   const [heroLoaded, setHeroLoaded] = useState(false);
 
+  // Paginación & cache
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isFetchingPage, setIsFetchingPage] = useState(false);
+  const [cachedSummary, setCachedSummary] = useState(null);
+  const loadMoreRef = useRef(null);
+
+
   // Sticky shadow para la barra de categorías
   const [stickyShadow, setStickyShadow] = useState(false);
   const stickySentinelRef = useRef(null);
@@ -217,44 +274,143 @@ const EventGallery = () => {
     run();
   }, [relayoutCard]);
 
-  const fetchEventData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .select('id, title, date, cover_image_url, settings, invitation_details')
-        .eq('id', eventId)
-        .single();
+  // HEAD de uploads: cuenta total y última fecha (para revalidar cache)
+  const getUploadsHead = useCallback(async (moderated) => {
+    let q = supabase
+      .from('uploads')
+      .select('uploaded_at', { count: 'exact' })
+      .eq('event_id', eventId)
+      .order('uploaded_at', { ascending: false })
+      .limit(1);
+    if (moderated) q = q.eq('approved', true);
+    const { data, error, count } = await q;
+    if (error) throw error;
+    const latest = data?.[0]?.uploaded_at || null;
+    return { count: count || 0, latest };
+  }, [eventId]);
 
-      if (eventError || !eventData) {
-        toast({ title: 'Evento no encontrado', variant: 'destructive' });
-        navigate('/');
-        return;
+  // Página de uploads (select mínimo + paginación)
+  const fetchUploadsPage = useCallback(async (pageIdx, moderated) => {
+    const from = pageIdx * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    let q = supabase
+      .from('uploads')
+      .select(MIN_FIELDS)
+      .eq('event_id', eventId)
+      .order('uploaded_at', { ascending: false })
+      .range(from, to);
+    if (moderated) q = q.eq('approved', true);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  }, [eventId]);
+
+  // Carga inicial: evento + cache local + revalidación + primera página
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setLoading(true);
+
+        // 1) Evento
+        const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .select('id, title, date, cover_image_url, settings, invitation_details')
+          .eq('id', eventId)
+          .single();
+
+        if (eventError || !eventData) {
+          toast({ title: 'Evento no encontrado', variant: 'destructive' });
+          navigate('/');
+          return;
+        }
+        if (!alive) return;
+        setEvent(eventData);
+
+        const moderated = !!(eventData.settings?.requireModeration);
+        const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
+
+        // 2) Mostrar CACHE si existe (render instantáneo)
+        const cached = await uploadsCache.get(cacheKey).catch(() => null);
+        if (cached?.items?.length) {
+          if (!alive) return;
+          setUploads(cached.items);
+          setCachedSummary(cached.summary || null);
+          setLoading(false);
+          setPage(Math.ceil(cached.items.length / PAGE_SIZE));
+          setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
+        }
+
+        // 3) Revalidar con HEAD
+        const head = await getUploadsHead(moderated);
+        if (!alive) return;
+
+        const cacheIsFresh =
+          cached?.summary &&
+          cached.summary.count === head.count &&
+          cached.summary.latest === head.latest;
+
+        if (cacheIsFresh) {
+          // Cache válido: nada más que hacer
+          if (cached && !cached.items?.length) setHasMore(false);
+          return;
+        }
+
+        // 4) Cache desactualizado o ausente → pedir primera página
+        const first = await fetchUploadsPage(0, moderated);
+        if (!alive) return;
+        setUploads(first);
+        setPage(1);
+        setHasMore(first.length === PAGE_SIZE);
+        setCachedSummary(head);
+        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching gallery data:', error);
+        toast({
+          title: 'Error al cargar la galería',
+          description: error.message,
+          variant: 'destructive'
+        });
+        setLoading(false);
       }
-      setEvent(eventData);
+    })();
+    return () => { alive = false; };
+  }, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
 
-      const { data: uploadsData, error: uploadsError } = await supabase
-        .from('uploads')
-        .select('*')
-        .eq('event_id', eventId)
-        .order('uploaded_at', { ascending: true });
+  // Cargar más páginas al hacer scroll
+  const loadMore = useCallback(async () => {
+    if (isFetchingPage || !hasMore || !event) return;
+    setIsFetchingPage(true);
+    try {
+      const moderated = !!(event.settings?.requireModeration);
+      const next = await fetchUploadsPage(page, moderated);
+      const combined = [...uploads, ...next];
+      setUploads(combined);
+      setPage(prev => prev + 1);
+      setHasMore(next.length === PAGE_SIZE);
 
-      if (uploadsError) throw uploadsError;
-
-      setUploads(uploadsData || []);
-    } catch (error) {
-      console.error('Error fetching gallery data:', error);
-      toast({
-        title: 'Error al cargar la galería',
-        description: error.message,
-        variant: 'destructive'
-      });
+      const head = cachedSummary || await getUploadsHead(moderated);
+      const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
+      await uploadsCache.set(cacheKey, { items: combined, summary: head, savedAt: Date.now() });
+    } catch (e) {
+      console.error(e);
     } finally {
-      setLoading(false);
+      setIsFetchingPage(false);
     }
-  }, [eventId, navigate]);
+  }, [isFetchingPage, hasMore, event, fetchUploadsPage, page, uploads, cachedSummary, getUploadsHead, eventId]);
 
-  useEffect(() => { fetchEventData(); }, [fetchEventData]);
+  // Observer del sentinel
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !hasMore) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) loadMore();
+    }, { rootMargin: '800px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loadMore, hasMore]);
+
 
   // Filtrar por moderación (si está activa, solo aprobados)
   const moderatedUploads = useMemo(() => {
@@ -330,42 +486,26 @@ const EventGallery = () => {
     return () => clearTimeout(t);
   }, [displayItems, relayoutAll]);
 
-  // Portada: prioriza cover_image_url si existe; si no, heurística por orientación
-  const pickCoverAsync = useCallback(async (allUploads) => {
-    // ✅ Priorizar portada fija si está configurada
+  // Portada sin descargar: usa dimensiones ya guardadas (web_width/height)
+  const pickCoverFromMeta = useCallback((allUploads) => {
     if (event?.cover_image_url) return event.cover_image_url;
 
-    // Sin portada fija → intentar heurística con subidas
-    if (!allUploads?.length) return null;
-
     const wantLandscape = isLandscapeViewport();
-    const images = allUploads.filter(u => u.type !== 'video');
-    const candidates = images.length ? images : allUploads;
-    if (!candidates.length) return null;
+    const imgs = (allUploads || []).filter(u => u.type !== 'video' && u.web_url && u.web_width && u.web_height);
+    if (!imgs.length) return null;
 
-    for (let i = 0; i < Math.min(candidates.length, 12); i++) {
-      const u = candidates[i];
-      const src = (u.web_url || u.file_url);
-      const size = await loadImageSize(src);
-      if (size && size.w && size.h) {
-        const isLandscape = size.w >= size.h;
-        if ((wantLandscape && isLandscape) || (!wantLandscape && !isLandscape)) {
-          return src;
-        }
-      }
-    }
-    const first = images[0] || candidates[0];
-    return (first?.web_url || first?.file_url || null);
+    const candidate =
+      imgs.find(u => wantLandscape ? u.web_width >= u.web_height : u.web_height >= u.web_width) ||
+      imgs[0];
+
+    return candidate.web_url || null;
   }, [event?.cover_image_url]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const chosen = await pickCoverAsync(normalizedSorted);
-      if (!cancelled) setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0');
-    })();
-    return () => { cancelled = true; };
-  }, [normalizedSorted, pickCoverAsync]);
+    const chosen = pickCoverFromMeta(uploads);
+    setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0');
+  }, [uploads, pickCoverFromMeta]);
+
 
   // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
@@ -423,13 +563,17 @@ const EventGallery = () => {
     const zip = new JSZip();
     for (const upload of normalizedSorted) {
       try {
-        const response = await fetch(upload.file_url); // ORIGINAL para ZIP
+        const src = upload.web_url || upload.thumb_url;
+        if (!src) continue;
+        const response = await fetch(src);
         const blob = await response.blob();
-        zip.file(upload.file_name || `${upload.id}`, blob);
+        const name = (upload.file_name || `${upload.id}`).replace(/\.[a-z0-9]+$/i, '') + '.webp';
+        zip.file(name, blob);
       } catch (e) {
-        console.error(`Failed to fetch ${upload.file_url}`, e);
+        console.error('Failed to fetch asset for zip', e);
       }
     }
+
 
     zip.generateAsync({ type: 'blob' }).then(async (content) => {
       saveAs(content, `mitus-galeria-${eventId}.zip`);
@@ -605,6 +749,10 @@ const EventGallery = () => {
           onImageReady={onImageReady}
           gridWrapperRef={gridWrapperRef}
         />
+
+        {/* Sentinel para carga incremental */}
+        <div ref={loadMoreRef} style={{ height: 1 }} />
+
 
         <footer className="text-center py-10 border-t border-black/5">
           <p className="text-xs text-black/60">Powered by Mitus</p>

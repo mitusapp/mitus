@@ -26,7 +26,12 @@ const ImageGrid = ({ displayItems, onItemClick, onImageReady, gridWrapperRef }) 
       >
         {displayItems.map((upload, index) => {
           const isVideo = upload.type === 'video';
-          const mediaUrl = isVideo ? upload.file_url : upload.web_url; // SOLO web para fotos
+
+          // Para el GRID: imágenes → THUMB; videos → archivo pero solo metadata
+          const imgUrl = upload.thumb_url || upload.web_url || upload.file_url || '';
+          const w = upload.thumb_width || upload.web_width || 1;
+          const h = upload.thumb_height || upload.web_height || 1;
+
 
           return (
             <motion.div
@@ -50,10 +55,12 @@ const ImageGrid = ({ displayItems, onItemClick, onImageReady, gridWrapperRef }) 
                   style={{ background: 'var(--grid-video-bg, #000)' }}
                 >
                   <video
-                    src={mediaUrl}
+                    src={upload.file_url}             // o la URL de tu video
                     className="w-full h-auto"
                     playsInline
                     muted
+                    preload="metadata"                // evita descargar el video completo
+                    poster={upload.thumb_url || ''}   // si tienes thumb, úsala de poster
                     data-media
                     onLoadedMetadata={(e) => onImageReady(e.currentTarget)}
                     style={{
@@ -61,27 +68,32 @@ const ImageGrid = ({ displayItems, onItemClick, onImageReady, gridWrapperRef }) 
                       transition: 'var(--grid-media-transition, filter .25s ease)',
                     }}
                   />
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <VideoIcon
-                      className="w-10 h-10 text-white/90"
-                      style={{ color: 'var(--grid-video-icon, rgba(255,255,255,.9))' }}
-                    />
-                  </div>
+
                 </div>
               ) : (
                 <img
-                  src={mediaUrl}
+                  src={imgUrl}                      // ⬅️ THUMB en el grid
                   alt={upload.title || 'Foto del evento'}
                   className="w-full h-auto select-none"
                   loading="lazy"
                   decoding="async"
+                  draggable="false"
+                  // Intrinsics para evitar reflow y ayudar al masonry
+                  width={w}
+                  height={h}
                   data-media
+                  data-w={w}
+                  data-h={h}
+                  // Pista de tamaño para el navegador (ajústalo si tu tema usa otras columnas)
+                  sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                   onLoad={(e) => onImageReady(e.currentTarget)}
                   style={{
                     filter: 'var(--grid-media-filter, none)',
                     transition: 'var(--grid-media-transition, filter .25s ease)',
+                    background: 'var(--grid-thumb-bg, #f3f4f6)' // opcional: color de fondo suave
                   }}
                 />
+
               )}
             </motion.div>
           );

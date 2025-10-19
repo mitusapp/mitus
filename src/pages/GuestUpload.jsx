@@ -242,10 +242,21 @@ const GuestUpload = () => {
       const isVideo = file.type.startsWith('video/');
       const isImage = file.type.startsWith('image/');
 
-      if ((!isVideo && !isImage) || (isImage && !allowPhoto) || (isVideo && !allowVideo)) {
+      // Videos: por ahora NO se soportan (no subimos originales).
+      if (isVideo) {
+        toast({
+          title: 'Video no soportado por ahora',
+          description: `El archivo ${file.name} es un video. En esta fase solo se aceptan fotos.`,
+          variant: 'destructive'
+        });
+        return null;
+      }
+
+      if ((!isImage) || (isImage && !allowPhoto)) {
         toast({ title: 'Archivo no permitido', description: `El archivo ${file.name} no es un tipo válido o no está permitido.`, variant: 'destructive' });
         return null;
       }
+
 
       const previewUrl = isImage ? URL.createObjectURL(file) : '';
       return {
@@ -382,68 +393,102 @@ const GuestUpload = () => {
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
 
-        const nameForExt = f.file?.name ?? f.name ?? 'bin';
-        const fileExt = nameForExt.split('.').pop()?.toLowerCase() || 'bin';
-        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`;
-        const storagePath = `${eventId}/${fileName}`;
+        // Seguridad: solo fotos (ya filtrado en selección, pero dejamos el guard)
+        const src = f.file || f;
+        const isImage = (src?.type || '').startsWith('image/');
+        if (!isImage) {
+          setUploadIndex(i + 1);
+          continue;
+        }
 
-        const toUpload = f.file || f;
-        const contentType = f.file?.type ?? f.type ?? 'application/octet-stream';
+        // 1) Generar versiones (web y thumb) en WebP
+        //    - web: máx 2048 px, q 0.82
+        //    - thumb: máx 600 px, q 0.72
+        const { blob: webBlob, w: webW, h: webH } = await compressImageToWeb(src, { maxDim: 2048, quality: 0.80, type: 'image/webp' });
+        const { blob: thBlob, w: thW, h: thH } = await compressImageToWeb(src, { maxDim: 900, quality: 0.80, type: 'image/webp' });
 
-        const { error: upErr } = await supabase.storage
-          .from('event-media')
-          .upload(storagePath, toUpload, {
-            cacheControl: '3600',
-            upsert: false,
-            contentType,
-          });
+        // 2) Paths y nombres (sin cambiar tu convención visible)
+        const now = new Date();
+        const yyyy = String(now.getFullYear());
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const uuid = ([1e7] + -1e3 + -4e3 + -8e3 + -1e11)
+          .replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+        const basePath = `${eventId}/${yyyy}/${mm}/${uuid}`;
+        const pathWeb = `${basePath}-w.webp`;
+        const pathTh = `${basePath}-t.webp`;
 
-        if (upErr) {
-          console.error('Storage upload error', upErr);
+        // 3) Subir ambas variantes con cache largo (1 año)
+        const bucket = supabase.storage.from('event-media');
+
+        const { error: upWebErr } = await bucket.upload(pathWeb, webBlob, {
+          cacheControl: '31536000',
+          upsert: false,
+          contentType: 'image/webp',
+        });
+        if (upWebErr) {
+          console.error('Storage upload error (web)', upWebErr);
           toast({
-            title: 'Error subiendo archivo',
-            description: `${(f.file?.name ?? f.name) || 'archivo'} → ${formatSupabaseError(upErr)}`,
+            title: 'Error subiendo imagen (web)',
+            description: `${(f.file?.name ?? f.name) || 'archivo'} → ${formatSupabaseError(upWebErr)}`,
             variant: 'destructive',
           });
           setUploadIndex(i + 1);
           continue;
         }
 
-        // URL pública (ajusta si usas signed URLs)
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from('event-media').getPublicUrl(storagePath);
+        const { error: upThErr } = await bucket.upload(pathTh, thBlob, {
+          cacheControl: '31536000',
+          upsert: false,
+          contentType: 'image/webp',
+        });
+        if (upThErr) {
+          console.error('Storage upload error (thumb)', upThErr);
+          toast({
+            title: 'Error subiendo miniatura',
+            description: `${(f.file?.name ?? f.name) || 'archivo'} → ${formatSupabaseError(upThErr)}`,
+            variant: 'destructive',
+          });
+          setUploadIndex(i + 1);
+          continue;
+        }
+
+        // 4) URLs públicas
+        const { data: wPub } = bucket.getPublicUrl(pathWeb);
+        const { data: tPub } = bucket.getPublicUrl(pathTh);
 
         const originalName = f.file?.name ?? f.name ?? 'archivo';
-        const originalSize = f.file?.size ?? f.size ?? 0;
-        const originalType = contentType;
-
-        // Fallback para NOT NULL en guest_name
         const safeGuestName = (guestName && guestName.trim()) ? guestName.trim() : 'Invitado';
 
+        // 5) Armar fila para BD (SIN original)
         rows.push({
           event_id: eventId,
           guest_name: safeGuestName,
           file_name: originalName,
-          file_size: originalSize,
-          file_type: originalType,
-          // original
-          file_url: publicUrl,
-          // versión web (si ya la tienes, reemplaza aquí)
-          web_url: publicUrl,
-          web_width: f.web_width || null,
-          web_height: f.web_height || null,
-          web_size: f.web_size || null,
+          file_size: webBlob.size,          // opcional: para mantener compatibilidad con dashboards
+          file_type: 'image/webp',
+          file_url: null,                   // <- SIN original
+          web_url: wPub.publicUrl,
+          web_width: webW,
+          web_height: webH,
+          web_size: webBlob.size,
+          thumb_url: tPub.publicUrl,
+          thumb_width: thW,
+          thumb_height: thH,
+          thumb_size: thBlob.size,
+          path_web: pathWeb,                // opcional (útil a futuro)
+          path_thumb: pathTh,               // opcional
           title: f.title || null,
           description: f.description || null,
-          type: originalType.startsWith('video') ? 'video' : 'photo',
+          type: 'photo',
           category: f.category ?? pendingCategory ?? DEFAULT_CATEGORY,
           approved: event?.settings?.requireModeration ? false : true,
           uploaded_at: new Date().toISOString(),
+          source_name: originalName,
         });
 
         setUploadIndex(i + 1);
       }
+
 
       // 2) Insertar en la tabla `uploads` y SOLO si sale bien, avisar + redirigir
       let insertedOk = false;
