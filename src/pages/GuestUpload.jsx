@@ -104,6 +104,23 @@ const formatSupabaseError = (err) => {
   return parts.join(' | ');
 };
 
+// ---- PENDING ROWS (solo BD) ---------------------------------
+const pendingRowsKey = (eventId, deviceId) =>
+  `mitus_pending_rows_${eventId}_${deviceId}`;
+
+const loadPendingRows = (key) => {
+  try { return JSON.parse(localStorage.getItem(key) || '[]'); }
+  catch { return []; }
+};
+
+const savePendingRows = (key, rows) => {
+  try { localStorage.setItem(key, JSON.stringify(rows)); } catch {}
+};
+
+const clearPendingRows = (key) => {
+  try { localStorage.removeItem(key); } catch {}
+};
+
 const GuestUpload = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -134,6 +151,9 @@ const GuestUpload = () => {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(true); // se muestra al cargar
   const [pendingCategory, setPendingCategory] = useState(null);
 
+  // Filas pendientes solo BD (reintento)
+  const [pendingRows, setPendingRows] = useState([]);
+
   const fileInputRef = useRef(null);
 
   // Mantener referencia viva para revocar URLs al desmontar
@@ -147,6 +167,10 @@ const GuestUpload = () => {
     const key = makeLocalCountKey(eventId, id);
     const val = parseInt(localStorage.getItem(key) || '0', 10);
     setUsedLocal(Number.isFinite(val) ? val : 0);
+
+    // Cargar pendientes de BD (si existen)
+    const pKey = pendingRowsKey(eventId, id);
+    setPendingRows(loadPendingRows(pKey));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
@@ -256,7 +280,6 @@ const GuestUpload = () => {
         toast({ title: 'Archivo no permitido', description: `El archivo ${file.name} no es un tipo válido o no está permitido.`, variant: 'destructive' });
         return null;
       }
-
 
       const previewUrl = isImage ? URL.createObjectURL(file) : '';
       return {
@@ -380,6 +403,50 @@ const GuestUpload = () => {
     fileInputRef.current?.click();
   };
 
+  // Reintento de guardado en BD sin re-subir a Storage
+  const retryDbInsert = async () => {
+    if (!eventId || !deviceId) return;
+    const key = pendingRowsKey(eventId, deviceId);
+    const rows = loadPendingRows(key);
+
+    if (!rows.length) {
+      toast({ title: 'No hay pendientes por guardar' });
+      return;
+    }
+
+    setUploading(true);
+    try {
+      let errorOut = null;
+
+      // UPSERT idempotente (requiere índice único en (event_id, path_web))
+      const { error } = await supabase
+        .from('uploads')
+        .upsert(rows, { onConflict: 'event_id,path_web', ignoreDuplicates: true, returning: 'minimal' });
+
+      if (error) errorOut = error;
+
+      if (errorOut) {
+        toast({ title: 'No se pudo guardar en la BD', description: errorOut.message, variant: 'destructive' });
+        return;
+      }
+
+      clearPendingRows(key);
+      setPendingRows([]);
+
+      const countKey = makeLocalCountKey(eventId, deviceId);
+      const prev = parseInt(localStorage.getItem(countKey) || '0', 10) || 0;
+      const next = prev + rows.length;
+      localStorage.setItem(countKey, String(next));
+      setUsedLocal?.(next);
+
+      toast({ title: `¡${rows.length} archivo(s) guardado(s) en la BD!` });
+      const goGallery = event?.settings?.allowGalleryView !== false;
+      navigate(goGallery ? `/event/${eventId}/gallery` : `/event/${eventId}`, { replace: true });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleUpload = async () => {
     if (!eventId || !files?.length) return;
 
@@ -489,21 +556,38 @@ const GuestUpload = () => {
         setUploadIndex(i + 1);
       }
 
-
-      // 2) Insertar en la tabla `uploads` y SOLO si sale bien, avisar + redirigir
+      // 2) Guardar filas como "pendientes" y hacer UPSERT en BD
       let insertedOk = false;
 
       if (rows.length) {
-        const { error: dbError } = await supabase.from('uploads').insert(rows);
+        // Guarda pendientes para poder reintentar si falla el INSERT
+        if (deviceId) {
+          const key = pendingRowsKey(eventId, deviceId);
+          savePendingRows(key, rows);
+          setPendingRows(rows);
+        }
+
+        // Upsert evita duplicados si el usuario reintenta varias veces
+        const { error: dbError } = await supabase
+          .from('uploads')
+          .upsert(rows, { onConflict: 'event_id,path_web', ignoreDuplicates: true, returning: 'minimal' });
+
         if (dbError) {
-          console.error('Supabase INSERT error', dbError);
+          console.error('Supabase UPSERT error', dbError);
           toast({
             title: 'Error al guardar en la base de datos',
             description: formatSupabaseError(dbError),
             variant: 'destructive',
           });
-          insertedOk = false;
+          insertedOk = false; // mantenemos los "pendientes"
         } else {
+          // Éxito → limpiamos pendientes
+          if (deviceId) {
+            const key = pendingRowsKey(eventId, deviceId);
+            clearPendingRows(key);
+            setPendingRows([]);
+          }
+
           // Actualiza conteo local por dispositivo (si lo usas)
           if (deviceId) {
             const key = makeLocalCountKey(eventId, deviceId);
@@ -512,6 +596,7 @@ const GuestUpload = () => {
             localStorage.setItem(key, String(next));
             setUsedLocal?.(next);
           }
+
           insertedOk = true;
         }
       }
@@ -547,7 +632,6 @@ const GuestUpload = () => {
         });
       } else {
         // Mantiene archivos en pantalla para reintentar INSERT sin volver a subir.
-        // Puedes agregar un botón "Reintentar guardar en BD" reutilizando `rows`.
       }
     } catch (e) {
       console.error(e);
@@ -658,8 +742,20 @@ const GuestUpload = () => {
       {/* Barra sticky inferior con botones */}
       <div className="fixed bottom-0 inset-x-0 z-50 border-t bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/75">
         <div className="max-w-3xl mx-auto px-6 py-3 grid grid-cols-2 gap-3">
-          <Button variant="outline" onClick={openFilePicker} disabled={uploading} className="py-4 text-base">
-            <Upload className="w-5 h-5 mr-2" /> Abrir galería
+          <Button
+            variant="outline"
+            onClick={
+              (!uploading && pendingRows.length > 0 && files.length === 0)
+                ? retryDbInsert
+                : openFilePicker
+            }
+            disabled={uploading}
+            className="py-4 text-base"
+          >
+            {(!uploading && pendingRows.length > 0 && files.length === 0)
+              ? 'Reintentar guardar'
+              : (<><Upload className="w-5 h-5 mr-2" /> Abrir galería</>)
+            }
           </Button>
           <Button onClick={handleUpload} disabled={files.length === 0 || uploading} className="py-4 text-base">
             {uploading ? `Subiendo… (${uploadIndex} de ${files.length} · ${percent}%)` : `Subir${files.length ? ` (${files.length})` : ''}`}

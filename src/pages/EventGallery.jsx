@@ -193,6 +193,10 @@ const EventGallery = () => {
 
   // Sticky shadow para la barra de categorías
   const [stickyShadow, setStickyShadow] = useState(false);
+
+  // Estado de conectividad (opcional para UI futura)
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
   const stickySentinelRef = useRef(null);
 
   // Referencias para layout grid
@@ -301,66 +305,78 @@ const EventGallery = () => {
 
   // Carga inicial: evento + cache local + revalidación + primera página
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
+  let alive = true;
+  let cached = null; // 👈 declarado fuera del try/catch para usarlo en el catch
 
-        // 1) Evento
-        const { data: eventData, error: eventError } = await supabase
-          .from('events')
-          .select('id, title, date, cover_image_url, settings, invitation_details')
-          .eq('id', eventId)
-          .single();
+  (async () => {
+    try {
+      setLoading(true);
 
-        if (eventError || !eventData) {
-          toast({ title: 'Evento no encontrado', variant: 'destructive' });
-          navigate('/');
-          return;
-        }
+      // 1) Evento
+      const { data: eventData, error: eventError } = await supabase
+        .from('events')
+        .select('id, title, date, cover_image_url, settings, invitation_details')
+        .eq('id', eventId)
+        .single();
+
+      if (eventError || !eventData) {
+        toast({ title: 'Evento no encontrado', variant: 'destructive' });
+        navigate('/');
+        return;
+      }
+      if (!alive) return;
+      setEvent(eventData);
+
+      const moderated = !!(eventData.settings?.requireModeration);
+      const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
+
+      // 2) Mostrar CACHE si existe (render instantáneo)
+      cached = await uploadsCache.get(cacheKey).catch(() => null);
+      if (cached?.items?.length) {
         if (!alive) return;
-        setEvent(eventData);
-
-        const moderated = !!(eventData.settings?.requireModeration);
-        const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
-
-        // 2) Mostrar CACHE si existe (render instantáneo)
-        const cached = await uploadsCache.get(cacheKey).catch(() => null);
-        if (cached?.items?.length) {
-          if (!alive) return;
-          setUploads(cached.items);
-          setCachedSummary(cached.summary || null);
-          setLoading(false);
-          setPage(Math.ceil(cached.items.length / PAGE_SIZE));
-          setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
-        }
-
-        // 3) Revalidar con HEAD
-        const head = await getUploadsHead(moderated);
-        if (!alive) return;
-
-        const cacheIsFresh =
-          cached?.summary &&
-          cached.summary.count === head.count &&
-          cached.summary.latest === head.latest;
-
-        if (cacheIsFresh) {
-          // Cache válido: nada más que hacer
-          if (cached && !cached.items?.length) setHasMore(false);
-          return;
-        }
-
-        // 4) Cache desactualizado o ausente → pedir primera página
-        const first = await fetchUploadsPage(0, moderated);
-        if (!alive) return;
-        setUploads(first);
-        setPage(1);
-        setHasMore(first.length === PAGE_SIZE);
-        setCachedSummary(head);
-        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+        setUploads(cached.items);
+        setCachedSummary(cached.summary || null);
         setLoading(false);
-      } catch (error) {
-        console.error('Error fetching gallery data:', error);
+        setPage(Math.ceil(cached.items.length / PAGE_SIZE));
+        setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
+      }
+
+      // 3) Revalidar con HEAD
+      const head = await getUploadsHead(moderated);
+      if (!alive) return;
+
+      const cacheIsFresh =
+        cached?.summary &&
+        cached.summary.count === head.count &&
+        cached.summary.latest === head.latest;
+
+      if (cacheIsFresh) {
+        // Cache válido: nada más que hacer
+        if (cached && !cached.items?.length) setHasMore(false);
+        return;
+      }
+
+      // 4) Cache desactualizado o ausente → pedir primera página
+      const first = await fetchUploadsPage(0, moderated);
+      if (!alive) return;
+      setUploads(first);
+      setPage(1);
+      setHasMore(first.length === PAGE_SIZE);
+      setCachedSummary(head);
+      await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching gallery data:', error);
+
+      // Si ya pintamos caché antes, evita el toast destructivo y márcate offline
+      // Nota: "cached" está en el mismo scope, justo antes del HEAD
+      if (cached?.items?.length) {
+        setIsOffline(true);
+        setLoading(false);
+        // (Opcional) Toast suave para contexto:
+        // toast({ title: 'Sin conexión', description: 'Mostrando galería guardada en este dispositivo.' });
+      } else {
+        // No hay caché ni red → mensaje de error normal
         toast({
           title: 'Error al cargar la galería',
           description: error.message,
@@ -368,9 +384,11 @@ const EventGallery = () => {
         });
         setLoading(false);
       }
-    })();
-    return () => { alive = false; };
-  }, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
+    }
+  })();
+  return () => { alive = false; };
+}, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
+
 
   // Cargar más páginas al hacer scroll
   const loadMore = useCallback(async () => {
@@ -512,6 +530,39 @@ const EventGallery = () => {
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+  // Cuando vuelve la conexión, revalida HEAD + 1ra página y refresca caché
+  useEffect(() => {
+    const onOnline = async () => {
+      setIsOffline(false);
+      if (!event) return;
+      try {
+        const moderated = !!(event.settings?.requireModeration);
+        const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
+        const head = await getUploadsHead(moderated);
+        const first = await fetchUploadsPage(0, moderated);
+
+        setUploads(first);
+        setPage(1);
+        setHasMore(first.length === PAGE_SIZE);
+        setCachedSummary(head);
+        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+
+        toast({ title: 'Conexión restablecida', description: 'Galería actualizada.' });
+      } catch {
+        // si algo falla al volver online, no molestamos al usuario
+      }
+    };
+    const onOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [event, eventId, getUploadsHead, fetchUploadsPage]);
+
 
   // Acciones
   const handleShare = () => {

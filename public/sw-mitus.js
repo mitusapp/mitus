@@ -2,7 +2,7 @@
 const THUMBS = 'mitus-thumbs-v1';
 const WEB    = 'mitus-web-v1';
 const MAX_THUMBS = 5000;
-const MAX_WEB    = 800;
+const MAX_WEB    = 1500;
 
 // Limitar tamaño del cache (naive LRU)
 async function trimCache(cacheName, maxEntries) {
