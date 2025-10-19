@@ -27,19 +27,19 @@ const DEFAULT_CATEGORY = 'MÁS MOMENTOS';
 
 // Colores por categoría (según indicación)
 const CATEGORY_UI = {
-  'DESTACADO':              { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-800',   hover: 'hover:bg-slate-100' },
-  'PREPARACIÓN':            { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-800',    hover: 'hover:bg-blue-100' },
-  'PRIMERA VISTA':          { bg: 'bg-cyan-50',    border: 'border-cyan-200',    text: 'text-cyan-800',    hover: 'hover:bg-cyan-100' },
-  'CEREMONIA':              { bg: 'bg-indigo-50',  border: 'border-indigo-200',  text: 'text-indigo-800',  hover: 'hover:bg-indigo-100' },
-  'RETRATOS':               { bg: 'bg-teal-50',    border: 'border-teal-200',    text: 'text-teal-800',    hover: 'hover:bg-teal-100' },
-  'PROTOCOLO':              { bg: 'bg-sky-50',     border: 'border-sky-200',     text: 'text-sky-800',     hover: 'hover:bg-sky-100' },
-  'FAMILIA':                { bg: 'bg-rose-50',    border: 'border-rose-200',    text: 'text-rose-800',    hover: 'hover:bg-rose-100' },
-  'AMIGOS':                 { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-800',   hover: 'hover:bg-amber-100' },
-  'RECEPCIÓN':              { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800', hover: 'hover:bg-emerald-100' },
-  'LA FIESTA':              { bg: 'bg-violet-50',  border: 'border-violet-200',  text: 'text-violet-800',  hover: 'hover:bg-violet-100' },
-  'DETALLES & DECORACIÓN':  { bg: 'bg-purple-50',  border: 'border-purple-200',  text: 'text-purple-800',  hover: 'hover:bg-purple-100' },
+  'DESTACADO': { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-800', hover: 'hover:bg-slate-100' },
+  'PREPARACIÓN': { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-100' },
+  'PRIMERA VISTA': { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-800', hover: 'hover:bg-cyan-100' },
+  'CEREMONIA': { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-800', hover: 'hover:bg-indigo-100' },
+  'RETRATOS': { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-800', hover: 'hover:bg-teal-100' },
+  'PROTOCOLO': { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-800', hover: 'hover:bg-sky-100' },
+  'FAMILIA': { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-800', hover: 'hover:bg-rose-100' },
+  'AMIGOS': { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-800', hover: 'hover:bg-amber-100' },
+  'RECEPCIÓN': { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800', hover: 'hover:bg-emerald-100' },
+  'LA FIESTA': { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-800', hover: 'hover:bg-violet-100' },
+  'DETALLES & DECORACIÓN': { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-100' },
   // Por si algún día muestras el DEFAULT como chip:
-  'MÁS MOMENTOS':           { bg: 'bg-slate-50',   border: 'border-slate-200',   text: 'text-slate-800',   hover: 'hover:bg-slate-100' },
+  'MÁS MOMENTOS': { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-800', hover: 'hover:bg-slate-100' },
 };
 
 // --- Helper: compresión de imágenes en el navegador (WebP 1800px máx) ---
@@ -82,7 +82,7 @@ const getOrCreateDeviceId = () => {
   const KEY = 'mitus_device_id_v1';
   let id = localStorage.getItem(KEY);
   if (!id) {
-    id = ([1e7]+-1e3+-4e3+-8e3+-1e11)
+    id = ([1e7] + -1e3 + -4e3 + -8e3 + -1e11)
       .replace(/[018]/g, c =>
         (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
       );
@@ -92,6 +92,17 @@ const getOrCreateDeviceId = () => {
 };
 
 const makeLocalCountKey = (eventId, deviceId) => `mitus_uploaded_count_${eventId}_${deviceId}`;
+
+// Helper para mostrar el error completo de Supabase en un toast
+const formatSupabaseError = (err) => {
+  if (!err) return 'Error desconocido';
+  const parts = [];
+  if (err.message) parts.push(err.message);
+  if (err.code) parts.push(`code: ${err.code}`);
+  if (err.details) parts.push(`details: ${err.details}`);
+  if (err.hint) parts.push(`hint: ${err.hint}`);
+  return parts.join(' | ');
+};
 
 const GuestUpload = () => {
   const { eventId } = useParams();
@@ -197,7 +208,7 @@ const GuestUpload = () => {
 
   // Revocar URLs SOLO al desmontar pantalla
   useEffect(() => {
-    return () => { filesRef.current.forEach(f => { if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch {} } }); };
+    return () => { filesRef.current.forEach(f => { if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch { } } }); };
   }, []);
 
   const allowPhoto = event?.settings?.allowPhotoUpload ?? true;
@@ -261,7 +272,7 @@ const GuestUpload = () => {
     setFiles(prev => {
       const copy = [...prev];
       const target = copy[index];
-      if (target?.previewUrl) { try { URL.revokeObjectURL(target.previewUrl); } catch {} }
+      if (target?.previewUrl) { try { URL.revokeObjectURL(target.previewUrl); } catch { } }
       copy.splice(index, 1);
       return copy;
     });
@@ -272,7 +283,7 @@ const GuestUpload = () => {
       const remaining = [];
       prev.forEach(f => {
         if (f.selected) {
-          if (f.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch {} }
+          if (f.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch { } }
         } else {
           remaining.push(f);
         }
@@ -359,120 +370,149 @@ const GuestUpload = () => {
   };
 
   const handleUpload = async () => {
-    if (files.length === 0) {
-      toast({ title: 'Selecciona archivos', description: 'Por favor selecciona una o más fotos/videos para subir', variant: 'destructive' });
-      return;
-    }
-
-    // Validación con base en conteo local (por dispositivo)
-    const capacity = Math.max(0, userLimit - used);
-    if (capacity <= 0) {
-      toast({ title: 'Límite alcanzado', description: `Ya llegaste a tu máximo de ${userLimit} archivos.`, variant: 'destructive' });
-      return;
-    }
-    const itemsToUpload = files.slice(0, capacity);
+    if (!eventId || !files?.length) return;
 
     setUploading(true);
     setUploadIndex(0);
 
-    const rows = [];
+    try {
+      // 1) Subir a Storage y preparar filas para la BD
+      const rows = [];
 
-    for (let i = 0; i < itemsToUpload.length; i++) {
-      const item = itemsToUpload[i];
-      const { file, type } = item;
-      const category = item.category || DEFAULT_CATEGORY;
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
 
-      try {
-        const now = new Date();
-        const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
-        const rand = Math.random().toString(36).slice(2, 8);
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const nameForExt = f.file?.name ?? f.name ?? 'bin';
+        const fileExt = nameForExt.split('.').pop()?.toLowerCase() || 'bin';
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${fileExt}`;
+        const storagePath = `${eventId}/${fileName}`;
 
-        // 1) Subir ORIGINAL siempre
-        const origPath = `${eventId}/orig/${stamp}_${rand}_${safeName}`;
-        const { error: uploadOrigErr } = await supabase.storage
+        const toUpload = f.file || f;
+        const contentType = f.file?.type ?? f.type ?? 'application/octet-stream';
+
+        const { error: upErr } = await supabase.storage
           .from('event-media')
-          .upload(origPath, file, { contentType: file.type, cacheControl: '3600', upsert: false });
-        if (uploadOrigErr) throw uploadOrigErr;
-        const { data: origUrlData } = supabase.storage.from('event-media').getPublicUrl(origPath);
+          .upload(storagePath, toUpload, {
+            cacheControl: '3600',
+            upsert: false,
+            contentType,
+          });
 
-        let webUrl = origUrlData.publicUrl;
-        let webW = null; let webH = null; let webSize = null;
-
-        // 2) Si es foto, generar y subir versión web optimizada (WebP)
-        if (type === 'photo') {
-          try {
-            const { blob: webBlob, w, h } = await compressImageToWeb(file, { maxDim: 1800, quality: 0.82, type: 'image/webp' });
-            const webSafe = safeName.replace(/\.[^.]+$/, '') + '.webp';
-            const webPath = `${eventId}/web/${stamp}_${rand}_${webSafe}`;
-            const { error: uploadWebErr } = await supabase.storage
-              .from('event-media')
-              .upload(webPath, webBlob, { contentType: 'image/webp', cacheControl: '3600', upsert: false });
-            if (!uploadWebErr) {
-              const { data: webUrlData } = supabase.storage.from('event-media').getPublicUrl(webPath);
-              webUrl = webUrlData.publicUrl; webW = w; webH = h; webSize = webBlob.size;
-            }
-          } catch (e) {
-            console.warn('Fallo al optimizar imagen, usando original para web_url', e);
-          }
+        if (upErr) {
+          console.error('Storage upload error', upErr);
+          toast({
+            title: 'Error subiendo archivo',
+            description: `${(f.file?.name ?? f.name) || 'archivo'} → ${formatSupabaseError(upErr)}`,
+            variant: 'destructive',
+          });
+          setUploadIndex(i + 1);
+          continue;
         }
+
+        // URL pública (ajusta si usas signed URLs)
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from('event-media').getPublicUrl(storagePath);
+
+        const originalName = f.file?.name ?? f.name ?? 'archivo';
+        const originalSize = f.file?.size ?? f.size ?? 0;
+        const originalType = contentType;
+
+        // Fallback para NOT NULL en guest_name
+        const safeGuestName = (guestName && guestName.trim()) ? guestName.trim() : 'Invitado';
 
         rows.push({
           event_id: eventId,
-          guest_name: guestName?.trim() ? guestName.trim() : null, // compatibilidad de flujo existente
-          file_name: file.name,
-          file_size: file.size,
-          file_type: file.type,
-          file_url: origUrlData.publicUrl, // ORIGINAL
-          web_url: webUrl,                  // OPTIMIZADO (o original como fallback)
-          web_width: webW,
-          web_height: webH,
-          web_size: webSize,
-          title: file.name,
-          description: '',
-          type: type === 'video' ? 'video' : 'photo',
-          category,
-          approved: !(event?.settings?.requireModeration ?? false),
+          guest_name: safeGuestName,
+          file_name: originalName,
+          file_size: originalSize,
+          file_type: originalType,
+          // original
+          file_url: publicUrl,
+          // versión web (si ya la tienes, reemplaza aquí)
+          web_url: publicUrl,
+          web_width: f.web_width || null,
+          web_height: f.web_height || null,
+          web_size: f.web_size || null,
+          title: f.title || null,
+          description: f.description || null,
+          type: originalType.startsWith('video') ? 'video' : 'photo',
+          category: f.category ?? pendingCategory ?? DEFAULT_CATEGORY,
+          approved: event?.settings?.requireModeration ? false : true,
           uploaded_at: new Date().toISOString(),
         });
 
         setUploadIndex(i + 1);
-      } catch (error) {
-        console.error('Upload error for file:', file.name, error);
-        toast({ title: `Error al subir ${file.name}`, description: error.message || 'Hubo un problema. Inténtalo de nuevo.', variant: 'destructive' });
       }
-    }
 
-    if (rows.length) {
-      const { error: dbError } = await supabase.from('uploads').insert(rows);
-      if (dbError) {
-        toast({ title: 'Error al guardar en la base de datos', description: dbError.message, variant: 'destructive' });
-      } else {
-        // Actualizar conteo local por dispositivo+evento
-        if (deviceId) {
-          const key = makeLocalCountKey(eventId, deviceId);
-          const prev = parseInt(localStorage.getItem(key) || '0', 10) || 0;
-          const next = prev + rows.length;
-          localStorage.setItem(key, String(next));
-          setUsedLocal(next);
+      // 2) Insertar en la tabla `uploads` y SOLO si sale bien, avisar + redirigir
+      let insertedOk = false;
+
+      if (rows.length) {
+        const { error: dbError } = await supabase.from('uploads').insert(rows);
+        if (dbError) {
+          console.error('Supabase INSERT error', dbError);
+          toast({
+            title: 'Error al guardar en la base de datos',
+            description: formatSupabaseError(dbError),
+            variant: 'destructive',
+          });
+          insertedOk = false;
+        } else {
+          // Actualiza conteo local por dispositivo (si lo usas)
+          if (deviceId) {
+            const key = makeLocalCountKey(eventId, deviceId);
+            const prev = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+            const next = prev + rows.length;
+            localStorage.setItem(key, String(next));
+            setUsedLocal?.(next);
+          }
+          insertedOk = true;
         }
       }
-    }
 
-    setUploading(false);
+      // 3) Limpiar previews SI y solo SI todo salió bien
+      if (insertedOk) {
+        const skipped = files.length - rows.length;
+        toast({
+          title:
+            skipped > 0
+              ? `¡${rows.length} archivo(s) subido(s) (se omitieron ${skipped})!`
+              : `¡${rows.length} archivo(s) subido(s)!`,
+          description: event?.settings?.requireModeration
+            ? 'Tus archivos están en revisión y aparecerán pronto.'
+            : 'Tus archivos ya están disponibles en la galería.',
+        });
 
-    if (rows.length) {
-      const skipped = files.length - rows.length;
+        // libera URLs temporales y resetea
+        files.forEach((f) => {
+          const u = f?.previewUrl;
+          if (u) {
+            try {
+              URL.revokeObjectURL(u);
+            } catch { }
+          }
+        });
+        setFiles([]);
+
+        // Redirección solo en éxito
+        const goGallery = event?.settings?.allowGalleryView !== false;
+        navigate(goGallery ? `/event/${eventId}/gallery` : `/event/${eventId}`, {
+          replace: true,
+        });
+      } else {
+        // Mantiene archivos en pantalla para reintentar INSERT sin volver a subir.
+        // Puedes agregar un botón "Reintentar guardar en BD" reutilizando `rows`.
+      }
+    } catch (e) {
+      console.error(e);
       toast({
-        title: skipped > 0 ? `¡${rows.length} archivos subidos (se omitieron ${skipped})!` : `¡${rows.length} archivos subidos!`,
-        description: event?.settings?.requireModeration ? 'Tus archivos están en revisión y aparecerán pronto.' : 'Tus archivos ya están disponibles en la galería.',
+        title: 'Error inesperado',
+        description: formatSupabaseError(e),
+        variant: 'destructive',
       });
-      // Revocar URLs y reset
-      files.forEach(f => { if (f?.previewUrl) { try { URL.revokeObjectURL(f.previewUrl); } catch {} } });
-      setFiles([]);
-
-      const goGallery = event?.settings?.allowGalleryView !== false;
-      navigate(goGallery ? `/event/${eventId}/gallery` : `/event/${eventId}`, { replace: true });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -604,6 +644,7 @@ const GuestUpload = () => {
       )}
     </div>
   );
+
 };
 
 export default GuestUpload;

@@ -176,6 +176,24 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
     return Number.isFinite(n) ? n : 48;
   })();
 
+  const subtitleX = (() => {
+    const raw = String(form['hero-subtitle-x'] || '50%');
+    const n = parseInt(raw.replace('%', ''), 10);
+    return Number.isFinite(n) ? n : 50;
+  })();
+  const subtitleY = (() => {
+    const raw = String(form['hero-subtitle-y'] || '58%'); // 8% debajo del 50% por defecto
+    const n = parseInt(raw.replace('%', ''), 10);
+    return Number.isFinite(n) ? n : 58;
+  })();
+  const heroSubtitleSizePx = (() => {
+    const raw = form['hero-subtitle-size'];
+    const m = String(raw || '').match(/(\d+)\s*px/i);
+    const n = m ? parseInt(m[1], 10) : 22;
+    return Number.isFinite(n) ? n : 22;
+  })();
+
+
   // ========= DECORACIÓN (Hero) =========
   // Helpers
   const pxNum = (v, d = 0) => {
@@ -456,12 +474,69 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
           </div>
         </div>
 
+        {/* Subtítulo (tipo de evento) */}
+        <div className="mt-6">
+          <h4 className="font-medium text-[#2D2D2D] mb-2">Subtítulo (tipo de evento)</h4>
+
+          <div className="grid sm:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-xs text-[#5E5E5E] mb-1">Posición subtítulo X (%)</label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={subtitleX}
+                onChange={(e) => setKey('hero-subtitle-x', `${parseInt(e.target.value, 10)}%`)}
+                className="w-full"
+              />
+              <div className="text-xs text-[#5E5E5E]">{subtitleX}%</div>
+            </div>
+            <div>
+              <label className="block text-xs text-[#5E5E5E] mb-1">Posición subtítulo Y (%)</label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={subtitleY}
+                onChange={(e) => setKey('hero-subtitle-y', `${parseInt(e.target.value, 10)}%`)}
+                className="w-full"
+              />
+              <div className="text-xs text-[#5E5E5E]">{subtitleY}%</div>
+            </div>
+          </div>
+
+          <div className="grid sm:grid-cols-3 gap-4 items-end mt-4">
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-[#5E5E5E] mb-1">Tamaño del subtítulo (px)</label>
+              <input
+                type="range"
+                min={12}
+                max={64}
+                value={heroSubtitleSizePx}
+                onChange={(e) => setKey('hero-subtitle-size', `${parseInt(e.target.value, 10)}px`)}
+                className="w-full"
+              />
+              <div className="text-xs text-[#5E5E5E]">{heroSubtitleSizePx}px</div>
+            </div>
+            <div>
+              <label className="block text-xs text-[#5E5E5E] mb-1">Color</label>
+              <input
+                type="color"
+                value={form['hero-subtitle-color'] || '#ffffff'}
+                onChange={(e) => setKey('hero-subtitle-color', e.target.value)}
+                className="h-10 w-16 p-1 rounded-md border bg-white"
+              />
+            </div>
+          </div>
+        </div>
+
+
         <div className="mt-3">
           <Button
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['hero-overlay', 'hero-image-filter', 'hero-heading-mode', 'hero-title-x', 'hero-title-y', 'hero-title-size'])}
+            onClick={() => delKeys(['hero-overlay', 'hero-image-filter', 'hero-heading-mode', 'hero-title-x', 'hero-title-y', 'hero-title-size', 'hero-subtitle-x', 'hero-subtitle-y', 'hero-subtitle-size', 'hero-subtitle-color'])}
           >
             Restaurar Cover
           </Button>

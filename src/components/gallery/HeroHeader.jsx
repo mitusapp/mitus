@@ -15,6 +15,7 @@ const HeroHeader = ({
   onDownloadRequest,
   onShare,
   onOpenSlideshow,
+  eventType,
 }) => {
   // Detecta el modo desde CSS vars: --hero-heading-mode: 'initials' | 'names'
   const [headingMode, setHeadingMode] = useState('initials');
@@ -110,6 +111,27 @@ const HeroHeader = ({
                       {initials}
                     </span>
                   </div>
+                </div>
+              )}
+              {eventType && (
+                <div
+                  className="font-raleway"
+                  style={{
+                    position: 'absolute',
+                    left: 'var(--hero-subtitle-x, 50%)',
+                    top: 'var(--hero-subtitle-y, calc(var(--hero-title-y, 50%) + 8%))',
+                    transform: 'translate(-50%, -50%)',
+                    color: 'var(--hero-subtitle-color, var(--hero-initials-color, #fff))',
+                    textShadow: 'var(--hero-subtitle-shadow, var(--hero-initials-text-shadow, 0 2px 12px rgba(0,0,0,.45)))',
+                    fontSize: 'var(--hero-subtitle-size, clamp(16px, 3.2vw, 22px))',
+                    fontWeight: 'var(--hero-subtitle-weight, 600)',
+                    letterSpacing: 'var(--hero-subtitle-tracking, .02em)',
+                    whiteSpace: 'nowrap',
+                    pointerEvents: 'none',
+                  }}
+                  aria-label={`Tipo de evento: ${eventType}`}
+                >
+                  {eventType}
                 </div>
               )}
             </div>

@@ -450,6 +450,7 @@ const EventGallery = () => {
 
   const eventDate = event ? new Date(event.date?.replace(/-/g, '/')) : null;
   const hostsText = event?.invitation_details?.hosts?.join(' & ') || event?.title || '';
+  const eventType = event?.title || '';
   const initials = getInitials(hostsText);
 
   // ⬇️ Merge final de overrides: BD + URL (URL tiene prioridad)
@@ -577,6 +578,7 @@ const EventGallery = () => {
           onDownloadRequest={handleDownloadRequest}
           onShare={handleShare}
           onOpenSlideshow={openSlideshow}
+          eventType={eventType}
         />
 
         {/* Sentinel para detectar sticky activo */}

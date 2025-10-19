@@ -7,13 +7,13 @@
 import React, { useEffect } from 'react';
 
 const AUTO_TITLES = {
-  boda: 'Nuestra boda',
-  quince: 'Mis quince años',
-  cumpleanos: 'Mi cumpleaños',
-  aniversario: 'Nuestro aniversario',
+  boda: 'Nuestra Boda',
+  quince: 'Mis Quince Años',
+  cumpleanos: 'Mi Cumpleaños',
+  aniversario: 'Nuestro Aniversario',
   babyshower: 'Mi Baby Shower',
   corporativo: 'Evento corporativo',
-  otro: 'Mi evento',
+  otro: 'Mi Evento',
 };
 
 export default function StepHostsEvent({ formData, setFormData }) {

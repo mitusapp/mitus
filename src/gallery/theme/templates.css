@@ -26,6 +26,16 @@
   --hero-cta-border-width: 1px;
   --hero-cta-blur: none;
 
+    /* SUBTÍTULO (tipo de evento) */
+  --hero-subtitle-x: 50%;
+  --hero-subtitle-y: calc(var(--hero-title-y, 50%) + 8%);
+  --hero-subtitle-size: clamp(16px, 3.2vw, 22px);
+  --hero-subtitle-color: var(--hero-initials-color, #fff);
+  --hero-subtitle-shadow: var(--hero-initials-text-shadow, 0 2px 12px rgba(0,0,0,.45));
+  --hero-subtitle-weight: 600;
+  --hero-subtitle-tracking: .02em;
+
+
   /* Aliases hacia variables usadas por componentes */
   --gallery-hero-btn-bg: var(--hero-cta-bg);
   --gallery-hero-btn-bg-hover: var(--hero-cta-bg-hover);
