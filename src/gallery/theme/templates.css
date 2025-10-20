@@ -1,7 +1,9 @@
-/* Plantillas de galería (variables CSS)
-   Nota: ahora las variables coinciden con las que consumen los componentes
-   (HeroHeader, CategoryBar). Mantienen el look actual por defecto.
-*/
+
+.gallery-theme {
+  /* Tipografía base y de títulos */
+  --font-family-base: "Lato", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
+  --font-family-title: "Playfair Display", Georgia, "Times New Roman", serif;
+}
 
 /* === BASE / CLASSIC (equivalente a tu diseño actual) === */
 .gallery-theme {
@@ -32,7 +34,7 @@
   --hero-subtitle-size: clamp(16px, 3.2vw, 22px);
   --hero-subtitle-color: var(--hero-initials-color, #fff);
   --hero-subtitle-shadow: var(--hero-initials-text-shadow, 0 2px 12px rgba(0,0,0,.45));
-  --hero-subtitle-weight: 600;
+  --hero-subtitle-weight: 200;
   --hero-subtitle-tracking: .02em;
 
 
@@ -111,6 +113,8 @@
   --hero-cta-fg: #111111;
   --hero-cta-border: rgba(0,0,0,.08);
 
+  --hero-subtitle-weight: 200;
+
   --topbar-bg: rgba(255,255,255,.92);
   --topbar-blur: blur(8px);
   --topbar-border: rgba(0,0,0,.06);
@@ -152,6 +156,8 @@
   --hero-cta-bg-hover: rgba(255,255,255,.26);
   --hero-cta-fg: #ffffff;
   --hero-cta-border: rgba(255,255,255,.38);
+
+  --hero-subtitle-weight: 200;
 
   --topbar-bg: rgba(255,255,255,.80);
   --topbar-border: rgba(0,0,0,.10);
@@ -263,3 +269,23 @@
   --hero-decor-texture-opacity: .22;
   --hero-decor-texture-blend: overlay;
 }
+
+/* Aplica la fuente base a toda la galería */
+.gallery-theme {
+  font-family: var(--font-family-base);
+}
+
+/* Hero: fuerza que cualquier clase antigua (raleway/lato) respete los tokens */
+.gallery-theme .font-raleway,
+.gallery-theme .font-lato {
+  font-family: var(--font-family-base) !important;
+}
+
+/* Hero: título y subtítulo con data-attributes */
+.gallery-theme [data-hero-title] {
+  font-family: var(--font-family-title, var(--font-family-base)) !important;
+}
+.gallery-theme [data-hero-subtitle] {
+  font-family: var(--font-family-subtitle, var(--font-family-base)) !important;
+}
+

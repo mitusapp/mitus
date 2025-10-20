@@ -116,6 +116,7 @@ const HeroHeader = ({
             >
               {hostsText && (
                 <div
+                  data-hero-title
                   className="font-raleway"
                   style={{
                     position: 'absolute',
@@ -155,6 +156,7 @@ const HeroHeader = ({
                     }}
                   >
                     <span
+                      data-hero-title
                       style={{
                         color: 'var(--hero-initials-color, #fff)',
                         textShadow: 'var(--hero-initials-text-shadow, 0 2px 12px rgba(0,0,0,.45))',
@@ -168,6 +170,7 @@ const HeroHeader = ({
 
               {eventType && (
                 <div
+                  data-hero-subtitle
                   className="font-raleway"
                   style={{
                     position: 'absolute',
@@ -177,7 +180,7 @@ const HeroHeader = ({
                     color: 'var(--hero-subtitle-color, var(--hero-initials-color, #fff))',
                     textShadow: 'var(--hero-subtitle-shadow, var(--hero-initials-text-shadow, 0 2px 12px rgba(0,0,0,.45)))',
                     fontSize: 'var(--hero-subtitle-size, clamp(16px, 3.2vw, 22px))',
-                    fontWeight: 'var(--hero-subtitle-weight, 600)',
+                    fontWeight: 'var(--hero-subtitle-weight, 200)',
                     letterSpacing: 'var(--hero-subtitle-tracking, .02em)',
                     whiteSpace: 'nowrap',
                     pointerEvents: 'none',

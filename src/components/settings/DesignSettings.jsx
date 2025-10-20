@@ -95,6 +95,8 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
     return Number.isFinite(n) ? n : 16;
   })();
   const fontFamilyBase = form['font-family-base'] || "'Lato', sans-serif";
+  const fontFamilyTitle = form['font-family-title'] || '';
+  const fontFamilySubtitle = form['font-family-subtitle'] || '';
 
   // ========= PALETAS (global – para futuras secciones) =========
   const paletteAccent = form['color-accent'] || '#9E7977';
@@ -904,6 +906,7 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
       <section className="rounded-xl border border-[#E6E3E0] bg-white p-4">
         <h3 className="font-semibold text-[#2D2D2D] mb-3">Typography</h3>
 
+        {/* Base (UI / cuerpo) */}
         <div className="grid sm:grid-cols-3 gap-4 items-end">
           <div>
             <label className="block text-xs text-[#5E5E5E] mb-1">Tamaño base (px)</label>
@@ -933,8 +936,9 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
               <option value="'Raleway', sans-serif">Raleway</option>
               <option value="'Inter', system-ui, -apple-system, Segoe UI, Roboto, sans-serif">Inter</option>
               <option value="'Montserrat', sans-serif">Montserrat</option>
-              <option value="'Playfair Display', serif">Playfair Display (serif)</option>
-              <option value="'DM Serif Display', serif">DM Serif Display (serif)</option>
+              <option value="'DM Sans', sans-serif">DM Sans</option>
+              <option value="'Manrope', sans-serif">Manrope</option>
+              <option value="'Source Sans 3', sans-serif">Source Sans 3</option>
               <option value={fontFamilyBase}>— mantener actual —</option>
             </select>
             <div className="mt-2">
@@ -950,12 +954,139 @@ const DesignSettings = ({ value = {}, onChange, eventId }) => {
           </div>
         </div>
 
+        {/* Título (Hero) */}
+        <div className="mt-6 grid sm:grid-cols-3 gap-4 items-end">
+          <div className="sm:col-span-3">
+            <label className="block text-xs text-[#5E5E5E] mb-1">Fuente de título (Hero)</label>
+            <select
+              className="w-full p-2 border rounded-md text-[#2D2D2D] bg-white"
+              value={fontFamilyTitle}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  // Hereda la base → eliminamos el override
+                  delKeys(['font-family-title']);
+                } else {
+                  setKey('font-family-title', v);
+                }
+              }}
+            >
+              {/* Opción “heredar base” (vacía) */}
+              <option value="">— heredar base —</option>
+
+              {/* Editorial / fine-art (serif display) */}
+              <option value="'Playfair Display', serif">Playfair Display</option>
+              <option value="'Cormorant Garamond', serif">Cormorant Garamond</option>
+              <option value="'EB Garamond', serif">EB Garamond</option>
+              <option value="'DM Serif Display', serif">DM Serif Display</option>
+              <option value="'Libre Bodoni', serif">Libre Bodoni</option>
+              <option value="'Gilda Display', serif">Gilda Display</option>
+              <option value="'Prata', serif">Prata</option>
+              <option value="'Bodoni Moda', serif">Bodoni Moda</option>
+              <option value="'Gloock', serif">Gloock</option>
+              <option value="'Cormorant Infant', serif">Cormorant Infant</option>
+              <option value="'Libre Caslon Display', serif">Libre Caslon Display</option>
+              <option value="'Lora', serif">Lora</option>
+
+              {/* También puedes usar sans si quieres continuidad */}
+              <option value="'Montserrat', sans-serif">Montserrat (sans)</option>
+              <option value="'Raleway', sans-serif">Raleway (sans)</option>
+
+              {/* Opción de mantener lo que ya hay en el override actual */}
+              <option value={fontFamilyTitle || ''}>
+                {fontFamilyTitle ? `— mantener actual (${fontFamilyTitle}) —` : '— mantener actual —'}
+              </option>
+            </select>
+            <div className="mt-2">
+              <label className="block text-xs text-[#5E5E5E] mb-1">Personalizada (Hero)</label>
+              <input
+                type="text"
+                value={fontFamilyTitle}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.trim() === '') delKeys(['font-family-title']);
+                  else setKey('font-family-title', v);
+                }}
+                placeholder="'Playfair Display', serif"
+                className="w-full p-2 border rounded-md text-[#2D2D2D] placeholder:text-[#9A9A9A] bg-white"
+              />
+              <p className="text-xs text-[#5E5E5E] mt-1">
+                Nota: si dejas este campo vacío, el título heredará la fuente base.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Subtítulo (Hero) */}
+        <div className="mt-6 grid sm:grid-cols-3 gap-4 items-end">
+          <div className="sm:col-span-3">
+            <label className="block text-xs text-[#5E5E5E] mb-1">Fuente de subtítulo (Hero)</label>
+            <select
+              className="w-full p-2 border rounded-md text-[#2D2D2D] bg-white"
+              value={fontFamilySubtitle}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) {
+                  // hereda base → elimina el override
+                  delKeys(['font-family-subtitle']);
+                } else {
+                  setKey('font-family-subtitle', v);
+                }
+              }}
+            >
+              {/* Heredar base */}
+              <option value="">— heredar base —</option>
+
+              {/* Serif “fine-art” / editorial */}
+              <option value="'Playfair Display', serif">Playfair Display</option>
+              <option value="'Cormorant Garamond', serif">Cormorant Garamond</option>
+              <option value="'EB Garamond', serif">EB Garamond</option>
+              <option value="'DM Serif Display', serif">DM Serif Display</option>
+              <option value="'Libre Bodoni', serif">Libre Bodoni</option>
+              <option value="'Gilda Display', serif">Gilda Display</option>
+              <option value="'Prata', serif">Prata</option>
+              <option value="'Bodoni Moda', serif">Bodoni Moda</option>
+              <option value="'Gloock', serif">Gloock</option>
+              <option value="'Cormorant Infant', serif">Cormorant Infant</option>
+              <option value="'Libre Caslon Display', serif">Libre Caslon Display</option>
+              <option value="'Lora', serif">Lora</option>
+
+              {/* Sans minimal */}
+              <option value="'Montserrat', sans-serif">Montserrat (sans)</option>
+              <option value="'Raleway', sans-serif">Raleway (sans)</option>
+
+              {/* Mantener actual */}
+              <option value={fontFamilySubtitle || ''}>
+                {fontFamilySubtitle ? `— mantener actual (${fontFamilySubtitle}) —` : '— mantener actual —'}
+              </option>
+            </select>
+
+            <div className="mt-2">
+              <label className="block text-xs text-[#5E5E5E] mb-1">Personalizada (Subtítulo)</label>
+              <input
+                type="text"
+                value={fontFamilySubtitle}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v.trim() === '') delKeys(['font-family-subtitle']);
+                  else setKey('font-family-subtitle', v);
+                }}
+                placeholder="'EB Garamond', serif"
+                className="w-full p-2 border rounded-md text-[#2D2D2D] placeholder:text-[#9A9A9A] bg-white"
+              />
+              <p className="text-xs text-[#5E5E5E] mt-1">
+                Si lo dejas vacío, el subtítulo hereda la fuente base.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="mt-3">
           <Button
             type="button"
             variant="outline"
             className="border-[#E6E3E0] text-[#2D2D2D]"
-            onClick={() => delKeys(['font-size-base', 'font-family-base'])}
+            onClick={() => delKeys(['font-size-base', 'font-family-base', 'font-family-title', 'font-family-subtitle'])}
           >
             Restaurar Typography
           </Button>

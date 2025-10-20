@@ -24,6 +24,64 @@ import { GalleryThemeProvider } from '@/gallery/theme';
 // ⬇️ variables CSS de plantillas
 import '@/gallery/theme/templates.css';
 
+// === Google Fonts: mapa de familias recomendadas (editorial / fine-art / minimal) ===
+const FONT_URLS = {
+  // Serif display (títulos)
+  'Playfair Display': 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap',
+  'Cormorant Garamond': 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&display=swap',
+  'EB Garamond': 'https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;600;700&display=swap',
+  'Libre Bodoni': 'https://fonts.googleapis.com/css2?family=Libre+Bodoni:wght@400;600;700&display=swap',
+  'Gilda Display': 'https://fonts.googleapis.com/css2?family=Gilda+Display&display=swap',
+  'Prata': 'https://fonts.googleapis.com/css2?family=Prata&display=swap',
+  'Bodoni Moda': 'https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@400;600;700&display=swap',
+  'Gloock': 'https://fonts.googleapis.com/css2?family=Gloock&display=swap',
+  'DM Serif Display': 'https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap',
+  'Cormorant Infant': 'https://fonts.googleapis.com/css2?family=Cormorant+Infant:wght@400;600;700&display=swap',
+  'Libre Caslon Display': 'https://fonts.googleapis.com/css2?family=Libre+Caslon+Display&display=swap',
+  'Lora': 'https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&display=swap',
+
+
+  // Sans (base/UI)
+  'Montserrat': 'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap',
+  'Lato': 'https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&display=swap',
+  'DM Sans': 'https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap',
+  'Inter': 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap',
+  'Manrope': 'https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;600;700&display=swap',
+  'Plus Jakarta Sans': 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700&display=swap',
+  'Work Sans': 'https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;600;700&display=swap',
+  'Source Sans 3': 'https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600;700&display=swap',
+  'Poppins': 'https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap',
+  'Red Hat Display': 'https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@400;500;700&display=swap',
+  'Red Hat Text': 'https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500;700&display=swap',
+  'Jost': 'https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap',
+  'Outfit': 'https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap',
+  'Space Grotesk': 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;600;700&display=swap',
+  'Roboto Condensed': 'https://fonts.googleapis.com/css2?family=Roboto+Condensed:wght@400;700&display=swap'
+};
+
+
+// Inyecta una hoja de estilos de Google Fonts solo una vez por familia
+function loadGoogleFont(family) {
+  const url = FONT_URLS[family];
+  if (!url) return;
+  const id = `gf-${family.replace(/\s+/g, '-').toLowerCase()}`;
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id;
+  link.rel = 'stylesheet';
+  link.href = url;
+  document.head.appendChild(link);
+}
+
+
+// Extrae la primera familia del token CSS ("Playfair Display", Georgia, … → Playfair Display)
+function primaryFamily(value) {
+  return String(value || '')
+    .split(',')[0]
+    .trim()
+    .replace(/^['"]|['"]$/g, '');
+}
+
 // === IndexedDB cache (metadatos de uploads) ===
 const uploadsCache = (() => {
   let dbPromise;
@@ -305,89 +363,89 @@ const EventGallery = () => {
 
   // Carga inicial: evento + cache local + revalidación + primera página
   useEffect(() => {
-  let alive = true;
-  let cached = null; // 👈 declarado fuera del try/catch para usarlo en el catch
+    let alive = true;
+    let cached = null; // 👈 declarado fuera del try/catch para usarlo en el catch
 
-  (async () => {
-    try {
-      setLoading(true);
+    (async () => {
+      try {
+        setLoading(true);
 
-      // 1) Evento
-      const { data: eventData, error: eventError } = await supabase
-        .from('events')
-        .select('id, title, date, cover_image_url, settings, invitation_details')
-        .eq('id', eventId)
-        .single();
+        // 1) Evento
+        const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .select('id, title, date, cover_image_url, settings, invitation_details')
+          .eq('id', eventId)
+          .single();
 
-      if (eventError || !eventData) {
-        toast({ title: 'Evento no encontrado', variant: 'destructive' });
-        navigate('/');
-        return;
-      }
-      if (!alive) return;
-      setEvent(eventData);
-
-      const moderated = !!(eventData.settings?.requireModeration);
-      const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
-
-      // 2) Mostrar CACHE si existe (render instantáneo)
-      cached = await uploadsCache.get(cacheKey).catch(() => null);
-      if (cached?.items?.length) {
+        if (eventError || !eventData) {
+          toast({ title: 'Evento no encontrado', variant: 'destructive' });
+          navigate('/');
+          return;
+        }
         if (!alive) return;
-        setUploads(cached.items);
-        setCachedSummary(cached.summary || null);
+        setEvent(eventData);
+
+        const moderated = !!(eventData.settings?.requireModeration);
+        const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
+
+        // 2) Mostrar CACHE si existe (render instantáneo)
+        cached = await uploadsCache.get(cacheKey).catch(() => null);
+        if (cached?.items?.length) {
+          if (!alive) return;
+          setUploads(cached.items);
+          setCachedSummary(cached.summary || null);
+          setLoading(false);
+          setPage(Math.ceil(cached.items.length / PAGE_SIZE));
+          setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
+        }
+
+        // 3) Revalidar con HEAD
+        const head = await getUploadsHead(moderated);
+        if (!alive) return;
+
+        const cacheIsFresh =
+          cached?.summary &&
+          cached.summary.count === head.count &&
+          cached.summary.latest === head.latest;
+
+        if (cacheIsFresh) {
+          // Cache válido: nada más que hacer
+          if (cached && !cached.items?.length) setHasMore(false);
+          return;
+        }
+
+        // 4) Cache desactualizado o ausente → pedir primera página
+        const first = await fetchUploadsPage(0, moderated);
+        if (!alive) return;
+        setUploads(first);
+        setPage(1);
+        setHasMore(first.length === PAGE_SIZE);
+        setCachedSummary(head);
+        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
         setLoading(false);
-        setPage(Math.ceil(cached.items.length / PAGE_SIZE));
-        setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
+      } catch (error) {
+        console.error('Error fetching gallery data:', error);
+
+        // Si ya pintamos caché antes, evita el toast destructivo y márcate offline
+        // Nota: "cached" está en el mismo scope, justo antes del HEAD
+        if (cached?.items?.length) {
+          setIsOffline(true);
+          setLoading(false);
+          // (Opcional) Toast suave para contexto:
+          // toast({ title: 'Sin conexión', description: 'Mostrando galería guardada en este dispositivo.' });
+        } else {
+          // No hay caché ni red → mensaje de error normal
+          toast({
+            title: 'Error al cargar la galería',
+            description: error.message,
+            variant: 'destructive'
+          });
+          setLoading(false);
+        }
       }
-
-      // 3) Revalidar con HEAD
-      const head = await getUploadsHead(moderated);
-      if (!alive) return;
-
-      const cacheIsFresh =
-        cached?.summary &&
-        cached.summary.count === head.count &&
-        cached.summary.latest === head.latest;
-
-      if (cacheIsFresh) {
-        // Cache válido: nada más que hacer
-        if (cached && !cached.items?.length) setHasMore(false);
-        return;
-      }
-
-      // 4) Cache desactualizado o ausente → pedir primera página
-      const first = await fetchUploadsPage(0, moderated);
-      if (!alive) return;
-      setUploads(first);
-      setPage(1);
-      setHasMore(first.length === PAGE_SIZE);
-      setCachedSummary(head);
-      await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching gallery data:', error);
-
-      // Si ya pintamos caché antes, evita el toast destructivo y márcate offline
-      // Nota: "cached" está en el mismo scope, justo antes del HEAD
-      if (cached?.items?.length) {
-        setIsOffline(true);
-        setLoading(false);
-        // (Opcional) Toast suave para contexto:
-        // toast({ title: 'Sin conexión', description: 'Mostrando galería guardada en este dispositivo.' });
-      } else {
-        // No hay caché ni red → mensaje de error normal
-        toast({
-          title: 'Error al cargar la galería',
-          description: error.message,
-          variant: 'destructive'
-        });
-        setLoading(false);
-      }
-    }
-  })();
-  return () => { alive = false; };
-}, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
+    })();
+    return () => { alive = false; };
+  }, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
 
 
   // Cargar más páginas al hacer scroll
@@ -648,32 +706,21 @@ const EventGallery = () => {
     return { ...base, ...urlOverrides };
   }, [event?.settings?.design, urlOverrides]);
 
-  // ⬇️ Carga dinámica de Google Fonts si la tipografía base lo requiere
+  // ⬇️ Carga dinámica de Google Fonts para Base y Título (desde tokens)
   useEffect(() => {
-    const familyBase = effectiveOverrides['font-family-base'];
-    if (!familyBase) return;
+    const baseToken = effectiveOverrides['font-family-base'];
+    const titleToken = effectiveOverrides['font-family-title'];
+    const subtitleToken = effectiveOverrides['font-family-subtitle'];
 
-    // extrae la primera familia, p.ej. "'Inter', system-ui, ..." -> Inter
-    const primary = String(familyBase).split(',')[0].trim().replace(/^['"]|['"]$/g, '');
-    const FONT_URLS = {
-      Inter: 'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
-      Montserrat: 'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap',
-      'Playfair Display': 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&display=swap',
-      'DM Serif Display': 'https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&display=swap',
-      // Lato y Raleway ya se importan en el <style> inline
-    };
-    const href = FONT_URLS[primary];
-    if (!href) return;
+    const base = primaryFamily(baseToken);
+    const title = primaryFamily(titleToken);
+    const subtitle = primaryFamily(subtitleToken);
 
-    const id = `gf-base-${primary.replace(/\s+/g, '-').toLowerCase()}`;
-    if (document.getElementById(id)) return;
-
-    const link = document.createElement('link');
-    link.id = id;
-    link.rel = 'stylesheet';
-    link.href = href;
-    document.head.appendChild(link);
+    if (base) loadGoogleFont(base);
+    if (title && title !== base) loadGoogleFont(title);
+    if (subtitle && subtitle !== base && subtitle !== title) loadGoogleFont(subtitle);
   }, [effectiveOverrides]);
+
 
   if (loading) {
     return <LoadingSpinner />;
