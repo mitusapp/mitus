@@ -18,12 +18,14 @@ const ImageGrid = ({ displayItems, onItemClick, onImageReady, gridWrapperRef }) 
       }}
     >
       <div
-        className="grid-masonry"
+        className="grid-masonry no-save"
+        onContextMenu={(e) => e.preventDefault()}
         style={{
           gap: 'var(--grid-gap, 6px)',
-          gridAutoRows: 'var(--grid-auto-rows, 1px)', // debe seguir siendo 1px para el masonry; el tema puede mantener 1px
+          gridAutoRows: 'var(--grid-auto-rows, 1px)',
         }}
       >
+
         {displayItems.map((upload, index) => {
           const isVideo = upload.type === 'video';
 
@@ -55,43 +57,51 @@ const ImageGrid = ({ displayItems, onItemClick, onImageReady, gridWrapperRef }) 
                   style={{ background: 'var(--grid-video-bg, #000)' }}
                 >
                   <video
-                    src={upload.file_url}             // o la URL de tu video
+                    src={upload.file_url}
                     className="w-full h-auto"
                     playsInline
                     muted
-                    preload="metadata"                // evita descargar el video completo
-                    poster={upload.thumb_url || ''}   // si tienes thumb, úsala de poster
+                    preload="metadata"
+                    poster={upload.thumb_url || ''}
                     data-media
                     onLoadedMetadata={(e) => onImageReady(e.currentTarget)}
                     style={{
                       filter: 'var(--grid-media-filter, none)',
                       transition: 'var(--grid-media-transition, filter .25s ease)',
                     }}
+
+                    // 👇 Añadir estos tres:
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
                   />
+
 
                 </div>
               ) : (
                 <img
-                  src={imgUrl}                      // ⬅️ THUMB en el grid
+                  src={imgUrl}
                   alt={upload.title || 'Foto del evento'}
                   className="w-full h-auto select-none"
                   loading="lazy"
                   decoding="async"
                   draggable="false"
-                  // Intrinsics para evitar reflow y ayudar al masonry
                   width={w}
                   height={h}
                   data-media
                   data-w={w}
                   data-h={h}
-                  // Pista de tamaño para el navegador (ajústalo si tu tema usa otras columnas)
                   sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                   onLoad={(e) => onImageReady(e.currentTarget)}
                   style={{
                     filter: 'var(--grid-media-filter, none)',
                     transition: 'var(--grid-media-transition, filter .25s ease)',
-                    background: 'var(--grid-thumb-bg, #f3f4f6)' // opcional: color de fondo suave
+                    background: 'var(--grid-thumb-bg, #f3f4f6)'
                   }}
+
+                  // 👇 Añadir estos dos:
+                  onDragStart={(e) => e.preventDefault()}
+                  onContextMenu={(e) => e.preventDefault()}
                 />
 
               )}

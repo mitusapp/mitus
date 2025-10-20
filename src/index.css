@@ -69,3 +69,19 @@ body {
 input:focus, textarea:focus, select:focus, button:focus-visible {
   @apply ring-2 ring-purple-500 ring-offset-2 ring-offset-background;
 }
+
+/* Bloqueo suave de guardado/selección/arrastre en zonas marcadas con .no-save */
+.no-save,
+.no-save * {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+.no-save img,
+.no-save video {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+

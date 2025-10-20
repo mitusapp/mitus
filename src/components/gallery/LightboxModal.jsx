@@ -93,13 +93,15 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
+        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center no-save"
         onClick={onClose}
+        onContextMenu={(e) => e.preventDefault()}   // ⬅️ añadido
         style={{
           // Permite tematizar el fondo del modal sin alterar el look actual
           background: 'var(--lightbox-bg, #ffffff)',
         }}
       >
+
         <div className="sr-only" aria-live="polite">
           {`Mostrando elemento ${currentIndex + 1} de ${uploads.length}`}
         </div>
@@ -129,15 +131,20 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
             ref={closeBtnRef}
             variant="ghost"
             size="icon"
-            className="text-black hover:bg-black/10 rounded-full"
+            className="text-black rounded-full hover:bg-transparent focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 transition-transform duration-150 ease-out hover:scale-110 hover:opacity-80 hover:shadow-[0_0_0_2px_rgba(0,0,0,.15)]"
             onClick={(e) => { e.stopPropagation(); onClose(); }}
             aria-label="Cerrar visor"
             style={{
               color: 'var(--lightbox-controls-fg, #000)',
+              WebkitTapHighlightColor: 'transparent',
+              outline: 'none',
+              boxShadow: 'none',
+              willChange: 'transform',
             }}
           >
             <X />
           </Button>
+
         </div>
 
         <div
@@ -178,7 +185,13 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
                       filter: 'var(--lightbox-media-filter, none)',
                       transition: 'var(--lightbox-media-transition, filter .25s ease)',
                     }}
+
+                    // ⬇️ añadidos
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
                   />
+
                 )
                 : (
                   <img
@@ -190,6 +203,11 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
                       filter: 'var(--lightbox-media-filter, none)',
                       transition: 'var(--lightbox-media-transition, filter .25s ease)',
                     }}
+
+                    // ⬇️ añadidos
+                    draggable="false"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
                   />
                 )}
             </motion.div>

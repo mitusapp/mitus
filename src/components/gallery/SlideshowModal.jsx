@@ -80,19 +80,21 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
       toast({ title: 'Descargas deshabilitadas', variant: 'destructive' });
       return;
     }
+
     const url = currentMedia.file_url || currentMedia.web_url || currentMedia.thumb_url;
     if (!url) {
       toast({ title: 'No hay archivo disponible para descargar', variant: 'destructive' });
       return;
     }
+
     const a = document.createElement('a');
     a.href = url;
     a.download = (currentMedia.file_name || currentMedia.title || 'mitus-foto.webp').replace(/\s+/g, '-');
-    a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
     a.remove();
   };
+
 
   const mediaUrl = currentMedia.type === 'video'
     ? currentMedia.file_url
@@ -113,8 +115,9 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center"
+        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center no-save"
         onClick={onClose}
+        onContextMenu={(e) => e.preventDefault()}
         style={{
           // Permite tematizar el fondo sin alterar el look por defecto
           background: 'var(--lightbox-bg, #ffffff)',
@@ -185,7 +188,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.25 }}
+              transition={{ duration: 0.3 }}
               className="flex items-center justify-center"
             >
               {currentMedia.type === 'video'
@@ -199,7 +202,14 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
                       filter: 'var(--lightbox-media-filter, none)',
                       transition: 'var(--lightbox-media-transition, filter .25s ease)',
                     }}
+
+                    // ⬇️ anti-descarga / anti-arrastre
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
+                    controlsList="nodownload noplaybackrate"
                   />
+
                 )
                 : (
                   <img
@@ -211,7 +221,13 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
                       filter: 'var(--lightbox-media-filter, none)',
                       transition: 'var(--lightbox-media-transition, filter .25s ease)',
                     }}
+
+                    // ⬇️ anti-descarga / anti-arrastre
+                    draggable="false"
+                    onDragStart={(e) => e.preventDefault()}
+                    onContextMenu={(e) => e.preventDefault()}
                   />
+
                 )}
             </motion.div>
           </AnimatePresence>
