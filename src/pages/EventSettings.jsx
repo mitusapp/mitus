@@ -267,7 +267,7 @@ const EventSettings = () => {
           </div>
 
           <div className="bg-white rounded-2xl p-8 border border-[#E6E3E0] shadow-sm space-y-8">
-            {/* Detalles generales */}
+            {/* Detalles generales de settings */}
             <section>
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Detalles Generales</h2>
               <div className="space-y-4">
