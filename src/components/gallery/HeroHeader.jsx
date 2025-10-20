@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ChevronDown, Download, Play, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { motion, useReducedMotion } from 'framer-motion';
 
 const HeroHeader = ({
   coverUrl,
@@ -38,6 +39,49 @@ const HeroHeader = ({
     }
   }, [hostsText, heroLoaded]);
 
+  // ===== Animación (solo al montar / tras cargar imagen) =====
+  const reduce = useReducedMotion();
+
+  // Contenedor que coordina el fade-in y stagger
+  const containerV = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { when: 'beforeChildren', staggerChildren: 0.08, delayChildren: 0.2 }
+    }
+  };
+
+  // Variante SIN mover 'y' (queda disponible si la necesitas)
+  const itemV_noY = reduce
+    ? {
+      hidden: { opacity: 0 },
+      visible: { opacity: 1, transition: { duration: 0.22 } }
+    }
+    : {
+      hidden: { opacity: 0, filter: 'blur(4px)' },
+      visible: {
+        opacity: 1,
+        filter: 'blur(0px)',
+        transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] }
+      }
+    };
+
+  // Variante con 'y' (deslizamiento suave)
+  const itemV_withY = reduce
+    ? {
+      hidden: { opacity: 0 },
+      visible: { opacity: 1, transition: { duration: 0.22 } }
+    }
+    : {
+      hidden: { opacity: 0, y: 12, filter: 'blur(4px)' },
+      visible: {
+        opacity: 1,
+        y: 0,
+        filter: 'blur(0px)',
+        transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] }
+      }
+    };
+
   return (
     <>
       <section className="hero-grid">
@@ -64,7 +108,12 @@ const HeroHeader = ({
           <div className="hero-decor-frame pointer-events-none" aria-hidden="true" />
 
           {(hostsText || initials) && (
-            <div className="absolute inset-0 z-10 pointer-events-none">
+            <motion.div
+              className="absolute inset-0 z-10 pointer-events-none"
+              variants={containerV}
+              initial="hidden"
+              animate={heroLoaded ? 'visible' : 'hidden'}
+            >
               {hostsText && (
                 <div
                   className="font-raleway"
@@ -83,15 +132,18 @@ const HeroHeader = ({
                   }}
                   aria-label={`Nombres en portada: ${hostsText}`}
                 >
-                  {hostsText}
+                  <motion.span variants={itemV_withY} style={{ display: 'inline-block' }}>
+                    {hostsText}
+                  </motion.span>
                 </div>
               )}
 
               {initials && (
-                <div
+                <motion.div
                   className="absolute inset-0 flex items-center justify-center"
                   style={{ display: headingMode === 'initials' ? 'flex' : 'none' }}
                   aria-label={`Iniciales de ${hostsText || ''}`}
+                  variants={itemV_withY}
                 >
                   <div
                     className="initials-circle font-lato"
@@ -111,8 +163,9 @@ const HeroHeader = ({
                       {initials}
                     </span>
                   </div>
-                </div>
+                </motion.div>
               )}
+
               {eventType && (
                 <div
                   className="font-raleway"
@@ -131,10 +184,12 @@ const HeroHeader = ({
                   }}
                   aria-label={`Tipo de evento: ${eventType}`}
                 >
-                  {eventType}
+                  <motion.span variants={itemV_withY} style={{ display: 'inline-block' }}>
+                    {eventType}
+                  </motion.span>
                 </div>
               )}
-            </div>
+            </motion.div>
           )}
 
           {/* Botón Ver Galería minimalista: solo texto subrayado */}
@@ -142,12 +197,22 @@ const HeroHeader = ({
             <button
               onClick={onScrollToGallery}
               aria-label="Saltar a la galería"
-              className="p-0 m-0 bg-transparent border-0 shadow-none rounded-none underline underline-offset-4 decoration-1 hover:opacity-90 focus:outline-none focus:ring-0"
+              className="p-0 m-0 bg-transparent border-0 shadow-none rounded-none hover:opacity-90 focus:outline-none focus:ring-0 no-underline"
               style={{ color: '#fff', background: 'transparent' }}
             >
-              Ver galería
+              <motion.span
+                initial="hidden"
+                animate={heroLoaded ? 'visible' : 'hidden'}
+                variants={itemV_withY}
+                transition={{ duration: 3, ease: [0.22, 1, 0.36, 1], delay: 3 }}
+                className="underline decoration-1 underline-offset-[8px]"   // 👈 más espacio
+                style={{ display: 'inline-block' }}
+              >
+                Ver galería
+              </motion.span>
             </button>
           </div>
+
 
         </div>
       </section>

@@ -472,7 +472,7 @@ const GuestUpload = () => {
         //    - web: máx 2048 px, q 0.82
         //    - thumb: máx 600 px, q 0.72
         const { blob: webBlob, w: webW, h: webH } = await compressImageToWeb(src, { maxDim: 2048, quality: 0.80, type: 'image/webp' });
-        const { blob: thBlob, w: thW, h: thH } = await compressImageToWeb(src, { maxDim: 900, quality: 0.80, type: 'image/webp' });
+        const { blob: thBlob, w: thW, h: thH } = await compressImageToWeb(src, { maxDim: 1200, quality: 0.80, type: 'image/webp' });
 
         // 2) Paths y nombres (sin cambiar tu convención visible)
         const now = new Date();
