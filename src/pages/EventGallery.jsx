@@ -593,8 +593,7 @@ const EventGallery = () => {
   }, [uploads, pickCoverFromMeta]);
 
 
-  // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
-  // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
+    // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
     const el = stickySentinelRef.current;      // <- FALTABA ESTO
     if (!el) return;
