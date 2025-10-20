@@ -252,6 +252,22 @@ const EventGallery = () => {
   // Sticky shadow para la barra de categorías
   const [stickyShadow, setStickyShadow] = useState(false);
 
+  // Visibilidad dinámica de CategoryBar (ocultar al bajar, mostrar al subir)
+  const [catbarVisible, setCatbarVisible] = useState(true);
+  const [nearTop, setNearTop] = useState(true);
+  const lastYRef = useRef(0);
+  const tickingRef = useRef(false);
+
+  // Sensibilidad: sube estos valores para que NO se oculte tan fácil con flicks rápidos
+  const HIDE_AFTER = 300;   // distancia desde el top antes de permitir ocultar
+  const DOWN_DELTA = 12;    // px de “empuje” hacia abajo requeridos para ocultar
+  const UP_DELTA = 8;       // px hacia arriba para volver a mostrar
+
+  // Cooldown para evitar parpadeos en desplazamientos rápidos
+  const COOL_DOWN_MS = 350;        // tiempo mínimo entre toggles
+  const lastToggleAtRef = useRef(0);
+
+
   // Estado de conectividad (opcional para UI futura)
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -578,16 +594,75 @@ const EventGallery = () => {
 
 
   // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
+  // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
-    const el = stickySentinelRef.current;
+    const el = stickySentinelRef.current;      // <- FALTABA ESTO
     if (!el) return;
+
     const io = new IntersectionObserver(
-      ([entry]) => setStickyShadow(!entry.isIntersecting),
-      { root: null, threshold: 0 }
+      ([entry]) => {
+        const isNearTop = entry.isIntersecting;
+        setNearTop(isNearTop);
+        setStickyShadow(!isNearTop);
+      },
+      // hace que “deje de intersectar” un poco ANTES de quedar tapado por la barra sticky
+      { root: null, threshold: 0, rootMargin: '-72px 0px 0px 0px' }
     );
+
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+
+  useEffect(() => {
+    const onScroll = () => {
+      // más cross-browser que solo window.scrollY
+      const y = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+      const last = lastYRef.current;
+      const delta = y - last;
+      lastYRef.current = y;
+
+      // lectura directa del sentinela para saber si estamos “cerca de la portada”
+      const sentinelTop = stickySentinelRef.current?.getBoundingClientRect().top ?? 0;
+      const nearNow = sentinelTop >= 0; // visible o tocando el borde superior
+
+      if (tickingRef.current) return;
+      tickingRef.current = true;
+
+      requestAnimationFrame(() => {
+        const now = performance.now();
+        const canToggle = (now - lastToggleAtRef.current) > COOL_DOWN_MS;
+
+        if (nearNow) {
+          if (!catbarVisible && canToggle) {
+            setCatbarVisible(true);
+            lastToggleAtRef.current = now;
+          }
+        } else {
+          // ocultar solo si bajamos con fuerza y ya pasamos el umbral desde el top
+          if (delta > DOWN_DELTA && y > HIDE_AFTER && catbarVisible && canToggle) {
+            setCatbarVisible(false);
+            lastToggleAtRef.current = now;
+          }
+          // mostrar solo si subimos con suficiente “empuje”
+          else if (delta < -UP_DELTA && !catbarVisible && canToggle) {
+            setCatbarVisible(true);
+            lastToggleAtRef.current = now;
+          }
+        }
+
+        tickingRef.current = false;
+      });
+
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll(); // inicializa acorde a la posición actual
+
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [catbarVisible]); // <- quitamos nearTop de deps para no “resuscribir” por cada notificación del IO
+
+
 
   // Cuando vuelve la conexión, revalida HEAD + 1ra página y refresca caché
   useEffect(() => {
@@ -818,7 +893,7 @@ const EventGallery = () => {
         />
 
         {/* Sentinel para detectar sticky activo */}
-        <div ref={stickySentinelRef} />
+        <div ref={stickySentinelRef} style={{ height: 1 }} aria-hidden="true" />
 
         {/* Barra de categorías */}
         <CategoryBar
@@ -827,6 +902,7 @@ const EventGallery = () => {
           items={barItems}
           active={activeCategory}
           onChange={setActiveCategory}
+          isVisible={catbarVisible}   // <- NUEVO
         />
 
         <div id="gallery-start" />

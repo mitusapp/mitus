@@ -1,7 +1,7 @@
 // src/components/gallery/CategoryBar.jsx
 import React from 'react';
 
-const CategoryBar = ({ show, stickyShadow, items, active, onChange }) => {
+const CategoryBar = ({ show, stickyShadow, items, active, onChange, isVisible = true }) => {
   if (!show) return null;
 
   const getVar = (name, fallback) =>
@@ -9,10 +9,13 @@ const CategoryBar = ({ show, stickyShadow, items, active, onChange }) => {
 
   return (
     <section
-      className={`sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10 ${stickyShadow ? 'shadow-sm' : ''}`}
+      className={`sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-black/10 ${stickyShadow ? 'shadow-sm' : ''} transition-transform duration-0 ease-out transform-gpu will-change-transform ${isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0 pointer-events-none'}`}
       style={{
+        willChange: 'transform, opacity',
+         transitionDuration: '800ms',
         background: 'var(--catbar-bg, rgba(255,255,255,.90))',
         backdropFilter: 'var(--catbar-blur, blur(8px))',
+        WebkitBackdropFilter: 'var(--catbar-blur, blur(8px))', // compat Safari/iOS
         borderColor: 'var(--catbar-border, rgba(0,0,0,.10))',
       }}
     >
