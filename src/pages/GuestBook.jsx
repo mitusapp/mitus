@@ -49,7 +49,7 @@ const GuestBook = () => {
     return data;
   }, [eventId, navigate]);
 
-  // Privado: solo trae mensajes del invitado actual
+  // Privado: solo trae mensajes del invitado actual 
   const fetchMessages = useCallback(async (name) => {
     if (!name) return;
     const { data, error } = await supabase
