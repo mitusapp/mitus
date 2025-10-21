@@ -841,7 +841,7 @@ const EventGallery = () => {
               /* Set Focal (x/y en %) */
               object-position: var(--hero-focal-x, 50%) var(--hero-focal-y, 50%);
               transform: scale(1.05);
-              transition: filter .5s ease, opacity .4s ease; filter: blur(6px); opacity: .85;
+              transition: filter 1.6s cubic-bezier(.22,1,.36,1), opacity 1.1s cubic-bezier(.22,1,.36,1); filter: blur(6px); opacity: .85;
             }
             .hero-bg img.loaded { filter: blur(0); opacity: 1; }
 
