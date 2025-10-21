@@ -1,12 +1,3 @@
-/* eslint-disable react/no-unknown-property */
-// src/pages/InvitationWizard.jsx (ACTUALIZADO)
-// Cambios clave (mínimos y sin tocar UI):
-// - El paso de portada ahora pasa el File original (setImageFile) y preview con objectURL (no base64).
-// - Al guardar: sube ORIGINAL a Storage (event-covers/<eventId>/orig/...).
-// - Genera versión WEB optimizada (WebP ~1800px) y la sube a event-covers/<eventId>/web/...
-// - Guarda la URL **WEB** en events.cover_image_url (todas las vistas seguirán funcionando igual pero más rápido).
-// - (Opcional) Deja original accesible para usos futuros (sin alterar el UI ni flujos).
-
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -16,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+
+import { compressImageToWeb } from '@/lib/imageCompression';
 
 // Registro de pasos
 import { steps } from '@/pages/invitation-wizard/steps';
@@ -32,28 +25,19 @@ const normalizeHosts = (val) => {
     .filter(Boolean);
 };
 
-// Compresión simple a WebP (~1800px) para portada (igual criterio que la galería)
-async function compressImageToWeb(file, { maxDim = 1800, quality = 0.82, type = 'image/webp' } = {}) {
-  const loadInput = async (f) => {
-    try { return await createImageBitmap(f); } catch {
-      const url = URL.createObjectURL(f);
-      const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
-      try { URL.revokeObjectURL(url); } catch {}
-      return img;
-    }
-  };
-  const bmp = await loadInput(file);
-  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
-  const w = Math.max(1, Math.round(bmp.width * scale));
-  const h = Math.max(1, Math.round(bmp.height * scale));
-  const can = (typeof OffscreenCanvas !== 'undefined') ? new OffscreenCanvas(w, h) : (() => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; })();
-  const ctx = can.getContext('2d');
-  ctx.drawImage(bmp, 0, 0, w, h);
-  const blob = (can.convertToBlob)
-    ? await can.convertToBlob({ type, quality })
-    : await new Promise((res) => can.toBlob(res, type, quality));
-  return { blob, w, h };
+// ------------ Helpers para limpiar portada anterior --------------------------
+const EVENT_COVERS_MARKER = '/object/public/event-covers/';
+function getEventCoversPathFromPublicUrl(publicUrl) {
+  try {
+    if (!publicUrl) return null;
+    const i = publicUrl.indexOf(EVENT_COVERS_MARKER);
+    if (i === -1) return null; // no pertenece a event-covers público
+    return decodeURIComponent(publicUrl.slice(i + EVENT_COVERS_MARKER.length));
+  } catch {
+    return null;
+  }
 }
+
 
 // ---------------------------- Componente ----------------------------------
 const initialData = {
@@ -145,6 +129,9 @@ function InvitationWizard() {
   // Extra: estado de guardado
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Recordar la portada actual (para poder borrarla si el usuario la reemplaza)
+  const [existingCoverUrl, setExistingCoverUrl] = useState(null);
+
   // Detectar modo edición
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -186,26 +173,29 @@ function InvitationWizard() {
         locations:
           Array.isArray(inv.locations) && inv.locations.length > 0
             ? inv.locations.map((l) => ({
-                title: l.title || '',
-                time: l.time || '',
-                address: l.address || '',
-                city: l.city || '',
-                state: l.state || '',
-                country: l.country || '',
-                lat: Number.isFinite(l.lat) ? l.lat : null,
-                lng: Number.isFinite(l.lng) ? l.lng : null,
-                placeId: l.placeId,
-              }))
+              title: l.title || '',
+              time: l.time || '',
+              address: l.address || '',
+              city: l.city || '',
+              state: l.state || '',
+              country: l.country || '',
+              lat: Number.isFinite(l.lat) ? l.lat : null,
+              lng: Number.isFinite(l.lng) ? l.lng : null,
+              placeId: l.placeId,
+            }))
             : prev.locations,
         indications: Array.isArray(inv.indications) ? inv.indications : prev.indications,
         template: inv.template || prev.template,
       }));
 
-      if (data.cover_image_url) setImagePreview(data.cover_image_url);
+      // ⬇️ Aquí guardamos tanto el preview como la URL existente para poder limpiar si se reemplaza
+      setImagePreview(data.cover_image_url || '');
+      setExistingCoverUrl(data.cover_image_url || null);
     };
 
     loadForEdit();
   }, [editingEventId, user]);
+
 
   // Persistencia local
   useEffect(() => {
@@ -234,100 +224,68 @@ function InvitationWizard() {
   const nextStep = () => updateStep(stepIndex + 1);
   const prevStep = () => updateStep(stepIndex - 1);
 
-  // Guardado en Supabase
+  // Guardado en Supabase (solo WEB optimizada; sin original)
   const saveEvent = async (isUpdate) => {
     if (!user) {
       toast({ title: 'Error de autenticación', description: 'Debes iniciar sesión para guardar.', variant: 'destructive' });
       return null;
     }
+    if (isSubmitting) return null;
     setIsSubmitting(true);
 
     try {
       const eventId = isUpdate ? editingEventId : shortEventId();
 
-      // Subida de portada (ORIGINAL + WEB optimizada)
-      let cover_image_url = imagePreview && imagePreview.startsWith('https://') ? imagePreview : null;
+      // Si no cambió la imagen en el wizard, conserva la existente (si es https)
+      let cover_image_url = (imagePreview && imagePreview.startsWith('https://')) ? imagePreview : null;
 
+      // Mantendremos el path nuevo para poder limpiar el antiguo
+      let newWebPath = null;
+
+      // Si el usuario seleccionó una nueva imagen en este wizard:
       if (imageFile) {
         const now = new Date();
         const stamp = now.toISOString().replace(/[-:TZ.]/g, '');
         const rand = Math.random().toString(36).slice(2, 8);
-        const safeName = (imageFile.name || `cover_${stamp}`).replace(/[^a-zA-Z0-9._-]/g, '_');
-        const ext = (imageFile.type.split('/')[1] || safeName.split('.').pop() || 'png').toLowerCase();
 
-        // 1) Subir ORIGINAL
-        const origPath = `${eventId}/orig/${stamp}_${rand}_${safeName}`;
-        const { error: upOrigErr } = await supabase.storage
+        // 1) Comprimir a WebP (~1800px)
+        const { blob: webBlob } = await compressImageToWeb(imageFile, { maxDim: 1800, quality: 0.82 });
+
+        // 2) Subir solo la versión WEB optimizada (cache largo)
+        newWebPath = `${eventId}/web/${stamp}_${rand}.webp`;
+        const { error: upWebErr } = await supabase.storage
           .from('event-covers')
-          .upload(origPath, imageFile, { contentType: imageFile.type, cacheControl: '3600', upsert: false });
-        if (upOrigErr) throw upOrigErr;
-        const { data: origUrlData } = supabase.storage.from('event-covers').getPublicUrl(origPath);
+          .upload(newWebPath, webBlob, { contentType: 'image/webp', cacheControl: '31536000', upsert: false });
+        if (upWebErr) throw upWebErr;
 
-        // 2) Generar y subir WEB optimizada (WebP ~1800px)
-        let webUrl = origUrlData.publicUrl;
-        try {
-          const { blob: webBlob } = await compressImageToWeb(imageFile, { maxDim: 1800, quality: 0.82, type: 'image/webp' });
-          const webSafe = safeName.replace(/\.[^.]+$/, '') + '.webp';
-          const webPath = `${eventId}/web/${stamp}_${rand}_${webSafe}`;
-          const { error: upWebErr } = await supabase.storage
-            .from('event-covers')
-            .upload(webPath, webBlob, { contentType: 'image/webp', cacheControl: '3600', upsert: false });
-          if (!upWebErr) {
-            const { data: webUrlData } = supabase.storage.from('event-covers').getPublicUrl(webPath);
-            webUrl = webUrlData.publicUrl;
-          }
-        } catch (e) {
-          console.warn('Fallo al optimizar portada; usando original como cover_image_url', e);
-        }
-
-        cover_image_url = webUrl; // usar siempre la versión web en el UI
-
-        // (Opcional) Guardar referencia al original dentro de invitation_details sin romper nada
-        // Se añadirá más abajo al armar eventData
-        formData.__cover_original_url = origUrlData.publicUrl;
-      } else if (imagePreview && !imagePreview.startsWith('https://')) {
-        // Fallback para compatibilidad: si alguien dejó una dataURL previa (casos antiguos)
-        try {
-          const response = await fetch(imagePreview);
-          const blob = await response.blob();
-          const fileExt = blob.type.split('/')[1] || 'png';
-          const fileName = `${Date.now()}.${fileExt}`;
-          const filePath = `public/${eventId}/${fileName}`;
-          const { error: uploadError } = await supabase.storage
-            .from('event-covers')
-            .upload(filePath, blob, { upsert: true });
-          if (uploadError) throw uploadError;
-          const { data: urlData } = supabase.storage.from('event-covers').getPublicUrl(filePath);
-          cover_image_url = urlData.publicUrl;
-        } catch (e) {
-          console.warn('Fallback base64 → blob falló:', e);
-        }
+        const { data: webPub } = supabase.storage.from('event-covers').getPublicUrl(newWebPath);
+        cover_image_url = webPub?.publicUrl || null;
       }
 
-      // Ensamblar payload
+      // Ensamblar payload (sin cover_original_url)
       const eventData = {
         title: formData.eventName,
-        date: formData.eventDate,                  // 'YYYY-MM-DD' sin UTC
+        date: formData.eventDate,               // 'YYYY-MM-DD'
         event_type: formData.eventType,
-        event_country: formData.eventCountry,      // NUEVO
-        event_city: formData.eventCity,            // NUEVO
-        event_currency: formData.eventCurrency,    // NUEVO
+        event_country: formData.eventCountry,
+        event_city: formData.eventCity,
+        event_currency: formData.eventCurrency,
         cover_image_url,
         user_id: user.id,
         invitation_details: {
           hosts: normalizeHosts(formData.hosts),
           welcome_message: formData.initialMessage,
           invitation_text: formData.invitationMessage,
-          event_time: formData.eventTime,          // 'HH:mm' local
+          event_time: formData.eventTime,
           locations: formData.locations,
           indications: formData.indications,
           template: formData.template,
           countdown: true,
-          // Guardar referencia al original (no usada por el UI actual)
-          cover_original_url: formData.__cover_original_url || undefined,
+          // (ya no guardamos original)
         },
       };
 
+      // Insert o Update
       let error;
       if (isUpdate) {
         ({ error } = await supabase.from('events').update(eventData).eq('id', eventId));
@@ -336,28 +294,42 @@ function InvitationWizard() {
       }
       if (error) throw error;
 
-      // Notificar a otras vistas que la lista cambió
-      try {
-        window.dispatchEvent(
-          new CustomEvent('events:changed', {
-            detail: {
-              id: eventId,
-              title: eventData.title,
-              date: eventData.date,
-              event_type: eventData.event_type,
-              cover_image_url: cover_image_url || null,
-              hosts: eventData.invitation_details?.hosts || [],
-              kind: isUpdate ? 'update' : 'insert',
-            },
-          })
-        );
-      } catch {}
-
-      // Limpiar cache local tras crear
-      if (!isUpdate) {
-        try { localStorage.removeItem('wizardFormData'); } catch {}
-        try { sessionStorage.removeItem('wizardImagePreview'); } catch {}
+      // Limpieza: si subimos nueva portada, borra la anterior del bucket
+      if (imageFile) {
+        try {
+          const oldWebPath = getEventCoversPathFromPublicUrl(existingCoverUrl);
+          if (oldWebPath && oldWebPath !== newWebPath) {
+            await supabase.storage.from('event-covers').remove([oldWebPath]);
+          }
+        } catch {
+          // silencioso
+        }
       }
+
+      // Notificar y limpiar caches locales
+      try {
+        window.dispatchEvent(new CustomEvent('events:changed', {
+          detail: {
+            id: eventId,
+            title: eventData.title,
+            date: eventData.date,
+            event_type: eventData.event_type,
+            cover_image_url: cover_image_url || null,
+            hosts: eventData.invitation_details?.hosts || [],
+            kind: isUpdate ? 'update' : 'insert',
+          },
+        }));
+      } catch { }
+
+      if (!isUpdate) {
+        try { localStorage.removeItem('wizardFormData'); } catch { }
+        try { sessionStorage.removeItem('wizardImagePreview'); } catch { }
+      }
+
+      // Actualiza referencias locales por si el usuario sigue en el wizard
+      if (cover_image_url) setImagePreview(cover_image_url);
+      if (cover_image_url) setExistingCoverUrl(cover_image_url);
+      setImageFile(null);
 
       return eventId;
     } catch (err) {
@@ -368,6 +340,7 @@ function InvitationWizard() {
       setIsSubmitting(false);
     }
   };
+
 
   const finishWizard = async () => {
     const isUpdate = Boolean(editingEventId);
@@ -415,9 +388,8 @@ function InvitationWizard() {
                 key={s.id}
                 onClick={() => updateStep(idx)}
                 title={s.title}
-                className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full border text-sm md:text-base cursor-pointer transition-all duration-300 hover:scale-110 ${
-                  isDoneOrCurrent ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-300 text-slate-500'
-                }`}
+                className={`w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full border text-sm md:text-base cursor-pointer transition-all duration-300 hover:scale-110 ${isDoneOrCurrent ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white border-slate-300 text-slate-500'
+                  }`}
               >
                 {SIcon ? <SIcon className="w-4 h-4 md:w-5 md:h-5" /> : idx + 1}
               </div>

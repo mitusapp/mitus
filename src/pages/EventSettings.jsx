@@ -25,6 +25,22 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 
+import { compressImageToWeb } from '@/lib/imageCompression';
+
+// Helper: obtiene el path relativo en 'event-covers' a partir de un publicUrl
+const EVENT_COVERS_MARKER = '/object/public/event-covers/';
+
+function getEventCoversPathFromPublicUrl(publicUrl) {
+  try {
+    if (!publicUrl) return null;
+    const i = publicUrl.indexOf(EVENT_COVERS_MARKER);
+    if (i === -1) return null; // no pertenece a este bucket
+    return decodeURIComponent(publicUrl.slice(i + EVENT_COVERS_MARKER.length));
+  } catch {
+    return null;
+  }
+}
+
 const EventSettings = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
@@ -179,12 +195,27 @@ const EventSettings = () => {
   };
 
   const handlePickExistingCover = async (url) => {
+    if (!url) return;
+    if (url === coverUrl) { // evitar trabajo si es la misma
+      setIsCoverDialogOpen(false);
+      return;
+    }
+
+    const prevCoverUrl = coverUrl; // para limpiar la anterior si era de event-covers
     try {
       const { error } = await supabase
         .from('events')
         .update({ cover_image_url: url })
         .eq('id', eventId);
       if (error) throw error;
+
+      // Borrar la portada anterior si pertenecía a 'event-covers' y es distinta
+      const oldPath = getEventCoversPathFromPublicUrl(prevCoverUrl);
+      const newPath = getEventCoversPathFromPublicUrl(url);
+      if (oldPath && oldPath !== newPath) {
+        await supabase.storage.from('event-covers').remove([oldPath]).catch(() => { });
+      }
+
       setCoverUrl(url);
       setIsCoverDialogOpen(false);
       toast({ title: 'Portada actualizada' });
@@ -193,63 +224,103 @@ const EventSettings = () => {
     }
   };
 
+
+
   const handleCoverFileChange = async (e) => {
+    if (isCoverUploading) return; // evita triggers repetidos
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      toast({ title: 'Archivo no válido', description: 'Selecciona una imagen (JPG/PNG/WebP).', variant: 'destructive' });
+      toast({
+        title: 'Archivo no válido',
+        description: 'Selecciona una imagen (JPG/PNG/WebP).',
+        variant: 'destructive'
+      });
       return;
     }
 
+    // Guarda la URL previa para poder limpiarla luego
+    const prevCoverUrl = coverUrl;
+
     try {
       setIsCoverUploading(true);
-      const safeName = file.name.replace(/\s+/g, '-').toLowerCase();
-      const path = `${eventId}/${Date.now()}-${safeName}`;
 
-      // ⬇️ Bucket sugerido: event-covers (créalo si no existe)
-      const { error: upErr } = await supabase
-        .storage
+      // 1) Comprimir a WebP (mismo criterio que la galería)
+      const { blob } = await compressImageToWeb(file, { maxDim: 2048, quality: 0.80 });
+
+      // 2) Construir ruta estable en el bucket 'event-covers'
+      const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '');
+      const rand = Math.random().toString(36).slice(2, 8);
+      const webPath = `${eventId}/cover/${stamp}_${rand}.webp`;
+
+      // 3) Subir versión optimizada (cache 1 año)
+      const { error: upErr } = await supabase.storage
         .from('event-covers')
-        .upload(path, file, { upsert: true, contentType: file.type });
-
+        .upload(webPath, blob, {
+          upsert: false,
+          contentType: 'image/webp',
+          cacheControl: '31536000'
+        });
       if (upErr) throw upErr;
 
-      const { data: pub } = supabase.storage.from('event-covers').getPublicUrl(path);
-      const publicUrl = pub?.publicUrl;
-      if (!publicUrl) throw new Error('No se pudo obtener URL pública');
+      // 4) URL pública y persistir en events.cover_image_url
+      const { data: pubWeb } = supabase.storage.from('event-covers').getPublicUrl(webPath);
+      const publicUrl = pubWeb?.publicUrl;
+      if (!publicUrl) throw new Error('No se pudo obtener URL pública de la portada');
 
       const { error: evErr } = await supabase
         .from('events')
         .update({ cover_image_url: publicUrl })
         .eq('id', eventId);
-
       if (evErr) throw evErr;
+
+      // 5) Limpiar la portada anterior si pertenecía a 'event-covers' y no es la misma
+      const oldPath = getEventCoversPathFromPublicUrl(prevCoverUrl);
+      const newPath = getEventCoversPathFromPublicUrl(publicUrl);
+      if (oldPath && oldPath !== newPath) {
+        await supabase.storage.from('event-covers').remove([oldPath]).catch(() => { });
+      }
 
       setCoverUrl(publicUrl);
       setIsCoverDialogOpen(false);
       toast({ title: 'Portada actualizada' });
     } catch (err) {
-      toast({ title: 'Error al subir portada', description: err.message, variant: 'destructive' });
+      toast({
+        title: 'Error al subir portada',
+        description: err?.message || 'Revisa tu conexión e inténtalo de nuevo.',
+        variant: 'destructive'
+      });
     } finally {
       setIsCoverUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
+
   const clearCover = async () => {
+    // Guarda el path del archivo actual (si es de event-covers) para borrarlo
+    const oldPath = getEventCoversPathFromPublicUrl(coverUrl);
+
     try {
       const { error } = await supabase
         .from('events')
         .update({ cover_image_url: null })
         .eq('id', eventId);
       if (error) throw error;
+
+      // Elimina el archivo en storage si pertenecía al bucket de portadas
+      if (oldPath) {
+        await supabase.storage.from('event-covers').remove([oldPath]).catch(() => { });
+      }
+
       setCoverUrl('');
       toast({ title: 'Portada quitada' });
     } catch (e) {
       toast({ title: 'No se pudo quitar la portada', description: e.message, variant: 'destructive' });
     }
   };
+
 
   if (loading) {
     return <LoadingSpinner />;
@@ -413,11 +484,11 @@ const EventSettings = () => {
               <h2 className="text-xl font-bold text-[#2D2D2D] mb-4">Descarga Completa de Galería</h2>
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="downloadCode" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><KeyRound className="w-4 h-4 mr-2"/>Código de Descarga</Label>
-                  <input id="downloadCode" type="text" value={settings.downloadCode || ''} onChange={(e) => handleSettingChange('downloadCode', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" placeholder="Ej: BODA2025"/>
+                  <Label htmlFor="downloadCode" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><KeyRound className="w-4 h-4 mr-2" />Código de Descarga</Label>
+                  <input id="downloadCode" type="text" value={settings.downloadCode || ''} onChange={(e) => handleSettingChange('downloadCode', e.target.value)} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" placeholder="Ej: BODA2025" />
                 </div>
                 <div>
-                  <Label htmlFor="downloadLimit" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><Hash className="w-4 h-4 mr-2"/>Límite de Descargas</Label>
+                  <Label htmlFor="downloadLimit" className="text-sm font-medium text-[#5E5E5E] mb-2 flex items-center"><Hash className="w-4 h-4 mr-2" />Límite de Descargas</Label>
                   <input id="downloadLimit" type="number" min="0" value={settings.downloadLimit || 0} onChange={(e) => handleSettingChange('downloadLimit', parseInt(e.target.value, 10))} className="w-full p-3 rounded-lg bg-[#F9F8F7] border border-[#E6E3E0] text-[#2D2D2D]" />
                 </div>
               </div>
