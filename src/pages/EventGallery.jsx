@@ -1,5 +1,5 @@
 // src/pages/EventGallery.jsx
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -9,15 +9,13 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
 import HeroHeader from '@/components/gallery/HeroHeader';
 import CategoryBar from '@/components/gallery/CategoryBar';
 import ImageGrid from '@/components/gallery/ImageGrid';
-import LightboxModal from '@/components/gallery/LightboxModal';
-import SlideshowModal from '@/components/gallery/SlideshowModal';
+const LightboxModal = React.lazy(() => import('@/components/gallery/LightboxModal'));
+const SlideshowModal = React.lazy(() => import('@/components/gallery/SlideshowModal'));
 
 // ⬇️ Provider de plantillas (no altera el look por defecto)
 import { GalleryThemeProvider } from '@/gallery/theme';
@@ -117,13 +115,14 @@ const uploadsCache = (() => {
 })();
 
 // === Campos mínimos y paginación ===
-const PAGE_SIZE = 90;
+const PAGE_SIZE = 50;
 const MIN_FIELDS = [
   'id', 'type', 'category', 'approved', 'uploaded_at', 'file_name',
   'web_url', 'web_width', 'web_height', 'web_size',
   'thumb_url', 'thumb_width', 'thumb_height', 'thumb_size'
 ].join(',');
-
+// TTL del caché de uploads (6 horas)
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 // Canon por defecto (soportamos mayúsculas/nuevas categorías y las antiguas)
 const DEFAULT_CATEGORY = 'MÁS MOMENTOS';
@@ -346,35 +345,20 @@ const EventGallery = () => {
     run();
   }, [relayoutCard]);
 
-  // HEAD de uploads: cuenta total y última fecha (para revalidar cache)
-  const getUploadsHead = useCallback(async (moderated) => {
-    let q = supabase
-      .from('uploads')
-      .select('uploaded_at', { count: 'exact' })
-      .eq('event_id', eventId)
-      .order('uploaded_at', { ascending: false })
-      .limit(1);
-    if (moderated) q = q.eq('approved', true);
-    const { data, error, count } = await q;
-    if (error) throw error;
-    const latest = data?.[0]?.uploaded_at || null;
-    return { count: count || 0, latest };
-  }, [eventId]);
-
   // Página de uploads (select mínimo + paginación)
-  const fetchUploadsPage = useCallback(async (pageIdx, moderated) => {
+  const fetchUploadsPage = useCallback(async (pageIdx, moderated, withCount = false) => {
     const from = pageIdx * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
     let q = supabase
       .from('uploads')
-      .select(MIN_FIELDS)
+      .select(MIN_FIELDS, withCount ? { count: 'exact' } : {})
       .eq('event_id', eventId)
       .order('uploaded_at', { ascending: false })
       .range(from, to);
     if (moderated) q = q.eq('approved', true);
-    const { data, error } = await q;
+    const { data, error, count } = await q;
     if (error) throw error;
-    return data || [];
+    return { items: data || [], count: typeof count === 'number' ? count : null };
   }, [eventId]);
 
   // Carga inicial: evento + cache local + revalidación + primera página
@@ -415,30 +399,26 @@ const EventGallery = () => {
           setHasMore(!cached.summary || cached.items.length < (cached.summary.count || 0));
         }
 
-        // 3) Revalidar con HEAD
-        const head = await getUploadsHead(moderated);
+        // 3) Si el caché es “fresco”, no toques la BD
+        const freshEnough = cached?.savedAt && (Date.now() - cached.savedAt) < CACHE_TTL_MS;
+        if (freshEnough) return;
+
+
+        // 4) Cache ausente o vencido → 1 sola llamada: primera página + count
+        const { items: first, count } = await fetchUploadsPage(0, moderated, true);
         if (!alive) return;
 
-        const cacheIsFresh =
-          cached?.summary &&
-          cached.summary.count === head.count &&
-          cached.summary.latest === head.latest;
-
-        if (cacheIsFresh) {
-          // Cache válido: nada más que hacer
-          if (cached && !cached.items?.length) setHasMore(false);
-          return;
-        }
-
-        // 4) Cache desactualizado o ausente → pedir primera página
-        const first = await fetchUploadsPage(0, moderated);
-        if (!alive) return;
         setUploads(first);
         setPage(1);
         setHasMore(first.length === PAGE_SIZE);
-        setCachedSummary(head);
-        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+
+        const latest = first?.[0]?.uploaded_at || null;
+        const summary = { count: count || first.length, latest };
+        setCachedSummary(summary);
+        await uploadsCache.set(cacheKey, { items: first, summary, savedAt: Date.now() });
+
         setLoading(false);
+
       } catch (error) {
         console.error('Error fetching gallery data:', error);
 
@@ -461,7 +441,7 @@ const EventGallery = () => {
       }
     })();
     return () => { alive = false; };
-  }, [eventId, navigate, getUploadsHead, fetchUploadsPage, toast, setEvent]);
+  }, [eventId, navigate, fetchUploadsPage, toast, setEvent]);
 
 
   // Cargar más páginas al hacer scroll
@@ -470,21 +450,23 @@ const EventGallery = () => {
     setIsFetchingPage(true);
     try {
       const moderated = !!(event.settings?.requireModeration);
-      const next = await fetchUploadsPage(page, moderated);
+      const { items: next } = await fetchUploadsPage(page, moderated, false);
       const combined = [...uploads, ...next];
       setUploads(combined);
       setPage(prev => prev + 1);
       setHasMore(next.length === PAGE_SIZE);
 
-      const head = cachedSummary || await getUploadsHead(moderated);
       const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
-      await uploadsCache.set(cacheKey, { items: combined, summary: head, savedAt: Date.now() });
+      const summaryForCache = cachedSummary || { count: null, latest: combined?.[0]?.uploaded_at || null };
+      await uploadsCache.set(cacheKey, { items: combined, summary: summaryForCache, savedAt: Date.now() });
+
+
     } catch (e) {
       console.error(e);
     } finally {
       setIsFetchingPage(false);
     }
-  }, [isFetchingPage, hasMore, event, fetchUploadsPage, page, uploads, cachedSummary, getUploadsHead, eventId]);
+  }, [isFetchingPage, hasMore, event, fetchUploadsPage, page, uploads, cachedSummary, eventId]);
 
   // Observer del sentinel
   useEffect(() => {
@@ -592,8 +574,13 @@ const EventGallery = () => {
     setCoverUrl(chosen || 'https://images.unsplash.com/photo-1617183478968-6e7f5a6406fd?q=80&w=1170&auto=format&fit=crop&ixlib=rb-4.1.0');
   }, [uploads, pickCoverFromMeta]);
 
+  useEffect(() => {
+    if (event?.cover_image_url) {
+      setCoverUrl(event.cover_image_url);
+    }
+  }, [event?.cover_image_url]);
 
-    // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
+  // Sticky shadow: cuando el sentinel sale de vista, activamos sombra
   useEffect(() => {
     const el = stickySentinelRef.current;      // <- FALTABA ESTO
     if (!el) return;
@@ -671,14 +658,17 @@ const EventGallery = () => {
       try {
         const moderated = !!(event.settings?.requireModeration);
         const cacheKey = `uploads:${eventId}${moderated ? ':approved' : ''}`;
-        const head = await getUploadsHead(moderated);
-        const first = await fetchUploadsPage(0, moderated);
+        const { items: first, count } = await fetchUploadsPage(0, moderated, true);
 
         setUploads(first);
         setPage(1);
         setHasMore(first.length === PAGE_SIZE);
-        setCachedSummary(head);
-        await uploadsCache.set(cacheKey, { items: first, summary: head, savedAt: Date.now() });
+
+        const latest = first?.[0]?.uploaded_at || null;
+        const summary = { count: count || first.length, latest };
+        setCachedSummary(summary);
+        await uploadsCache.set(cacheKey, { items: first, summary, savedAt: Date.now() });
+
 
         toast({ title: 'Conexión restablecida', description: 'Galería actualizada.' });
       } catch {
@@ -693,7 +683,7 @@ const EventGallery = () => {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, [event, eventId, getUploadsHead, fetchUploadsPage]);
+  }, [event, eventId, fetchUploadsPage]);
 
 
   // Acciones
@@ -737,36 +727,55 @@ const EventGallery = () => {
     setIsDownloading(true);
     toast({ title: 'Preparando descarga...', description: 'Esto puede tardar unos minutos.' });
 
-    const zip = new JSZip();
-    for (const upload of normalizedSorted) {
-      try {
-        const src = upload.web_url || upload.thumb_url;
-        if (!src) continue;
-        const response = await fetch(src);
-        const blob = await response.blob();
-        const name = (upload.file_name || `${upload.id}`).replace(/\.[a-z0-9]+$/i, '') + '.webp';
-        zip.file(name, blob);
-      } catch (e) {
-        console.error('Failed to fetch asset for zip', e);
+    try {
+      // 🔸 Carga bajo demanda de las librerías pesadas
+      const [{ default: JSZip }, { saveAs }] = await Promise.all([
+        import('jszip'),
+        import('file-saver'),
+      ]);
+
+      const zip = new JSZip();
+
+      for (const upload of normalizedSorted) {
+        try {
+          const src = upload.web_url || upload.thumb_url;
+          if (!src) continue;
+
+          const response = await fetch(src);
+          const blob = await response.blob();
+          const name =
+            (upload.file_name || `${upload.id}`).replace(/\.[a-z0-9]+$/i, '') + '.webp';
+
+          zip.file(name, blob);
+        } catch (e) {
+          console.error('Failed to fetch asset for zip', e);
+        }
       }
-    }
 
-
-    zip.generateAsync({ type: 'blob' }).then(async (content) => {
+      const content = await zip.generateAsync({ type: 'blob' });
       saveAs(content, `mitus-galeria-${eventId}.zip`);
       toast({ title: '¡Descarga completa!', description: 'Tu archivo ZIP está listo.' });
 
-      const newLimit = event.settings.downloadLimit - 1;
+      const newLimit = (event.settings.downloadLimit ?? 1) - 1;
       const { error } = await supabase
         .from('events')
         .update({ settings: { ...event.settings, downloadLimit: newLimit } })
         .eq('id', eventId);
+
       if (error) console.error('Error updating download limit:', error);
 
       setIsDownloadModalOpen(false);
-      setIsDownloading(false);
       setDownloadCode('');
-    });
+    } catch (err) {
+      console.error('Error preparando ZIP:', err);
+      toast({
+        title: 'Error al preparar la descarga',
+        description: err?.message || 'Inténtalo de nuevo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   const eventDate = event ? new Date(event.date?.replace(/-/g, '/')) : null;
@@ -841,9 +850,14 @@ const EventGallery = () => {
               /* Set Focal (x/y en %) */
               object-position: var(--hero-focal-x, 50%) var(--hero-focal-y, 50%);
               transform: scale(1.05);
-              transition: filter 1.6s cubic-bezier(.22,1,.36,1), opacity 1.1s cubic-bezier(.22,1,.36,1); filter: blur(6px); opacity: .85;
+              --hero-image-filter: blur(6px);
+              --hero-image-opacity: .85;
             }
-            .hero-bg img.loaded { filter: blur(0); opacity: 1; }
+            .hero-bg img.loaded {
+              --hero-image-filter: blur(0);
+              --hero-image-opacity: 1;
+            }
+
 
             /* Overlay con alias hacia --hero-overlay */
             .hero-overlay {
@@ -926,43 +940,49 @@ const EventGallery = () => {
         </footer>
 
         {/* Modales */}
-        <AnimatePresence>
-          {lightboxIndex !== null && (
-            <LightboxModal
-              event={event}
-              uploads={displayItems}
-              startIndex={lightboxIndex}
-              onClose={() => {
-                setLightboxIndex(null);
-                if (lastActiveElRef.current && lastActiveElRef.current.focus) {
-                  try { lastActiveElRef.current.focus(); } catch { }
-                }
-              }}
-              closeBtnRef={closeBtnRef}
-              onRequestSlideshow={(idx) => {
-                setLightboxIndex(null);
-                setSlideshowIndex(idx ?? 0);
-              }}
-            />
-          )}
-        </AnimatePresence>
+        <Suspense fallback={null}>
+          <AnimatePresence>
+            {lightboxIndex !== null && (
+              <LightboxModal
+                event={event}
+                uploads={displayItems}
+                startIndex={lightboxIndex}
+                onClose={() => {
+                  setLightboxIndex(null);
+                  if (lastActiveElRef.current && lastActiveElRef.current.focus) {
+                    try { lastActiveElRef.current.focus(); } catch { }
+                  }
+                }}
+                closeBtnRef={closeBtnRef}
+                onRequestSlideshow={(idx) => {
+                  setLightboxIndex(null);
+                  setSlideshowIndex(idx ?? 0);
+                }}
+              />
+            )}
+          </AnimatePresence>
+        </Suspense>
 
-        <AnimatePresence>
-          {slideshowIndex !== null && (
-            <SlideshowModal
-              event={event}
-              uploads={displayItems}
-              startIndex={slideshowIndex}
-              onClose={() => {
-                setSlideshowIndex(null);
-                if (lastActiveElRef.current && lastActiveElRef.current.focus) {
-                  try { lastActiveElRef.current.focus(); } catch { }
-                }
-              }}
-              closeBtnRef={closeBtnRef}
-            />
-          )}
-        </AnimatePresence>
+
+        <Suspense fallback={null}>
+          <AnimatePresence>
+            {slideshowIndex !== null && (
+              <SlideshowModal
+                event={event}
+                uploads={displayItems}
+                startIndex={slideshowIndex}
+                onClose={() => {
+                  setSlideshowIndex(null);
+                  if (lastActiveElRef.current && lastActiveElRef.current.focus) {
+                    try { lastActiveElRef.current.focus(); } catch { }
+                  }
+                }}
+                closeBtnRef={closeBtnRef}
+              />
+            )}
+          </AnimatePresence>
+        </Suspense>
+
 
         {/* Modal de descarga por código */}
         <Dialog open={isDownloadModalOpen} onOpenChange={setIsDownloadModalOpen}>

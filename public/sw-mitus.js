@@ -1,6 +1,7 @@
 // public/sw-mitus.js
 const THUMBS = 'mitus-thumbs-v1';
 const WEB    = 'mitus-web-v1';
+const APP_SHELL = 'app-shell';
 const MAX_THUMBS = 5000;
 const MAX_WEB    = 1500;
 
@@ -14,47 +15,76 @@ async function trimCache(cacheName, maxEntries) {
   }
 }
 
-self.addEventListener('install', (e) => {
+self.addEventListener('install', (event) => {
+  // Precargar el "app shell" para navegación offline
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(APP_SHELL);
+      await cache.addAll(['/index.html']);
+    } catch (e) {
+      // ignora errores de precache (no bloquea la instalación)
+    }
+  })());
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (e) => {
+self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  const url = new URL(req.url);
 
-  // Solo cachear recursos del Storage público
+  // 1) Navegaciones SPA: si no hay red, servir index.html desde caché
+  if (req.mode === 'navigate') {
+    event.respondWith((async () => {
+      try {
+        return await fetch(req);
+      } catch {
+        const cache = await caches.open(APP_SHELL);
+        const cached = await cache.match('/index.html');
+        return cached || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // 2) Solo manejamos GET para recursos
+  if (req.method !== 'GET') return;
+
+  // 3) Cache de imágenes: Storage público (Supabase) y portadas Unsplash
   const isStorage = url.pathname.includes('/storage/v1/object/public/event-media/');
-  if (!isStorage || event.request.method !== 'GET') return;
+  const isUnsplash = url.hostname === 'images.unsplash.com';
+  const isImageExt = /\.(webp|avif|jpg|jpeg|png|gif)$/i.test(url.pathname);
 
-  // Distinguir thumbs y web por nombre (-t.webp / -w.webp)
-  const isThumb   = url.pathname.endsWith('-t.webp');
+  // Si no es Storage ni (Unsplash + extensión de imagen) → no intervenimos
+  if (!isStorage && !(isUnsplash && isImageExt)) return;
+
+  // Distinguir thumbs y web (-t.webp / -w.webp) solo para Storage (en Unsplash no aplica)
+  const isThumb   = isStorage && url.pathname.endsWith('-t.webp');
   const cacheName = isThumb ? THUMBS : WEB;
   const maxEntries = isThumb ? MAX_THUMBS : MAX_WEB;
 
   event.respondWith((async () => {
     const cache = await caches.open(cacheName);
 
-    // 1) Si está en cache → devolverlo
-    const cached = await cache.match(event.request);
+    // 3.1 Cache first
+    const cached = await cache.match(req);
     if (cached) return cached;
 
-    // 2) Si no, ir a red y guardar (incluye respuestas opacas no-cors)
+    // 3.2 Network → cache (permite opaque para CORS)
     try {
-      const resp = await fetch(event.request);
-
+      const resp = await fetch(req);
       if (resp && (resp.ok || resp.type === 'opaque')) {
         try {
-          await cache.put(event.request, resp.clone());
+          await cache.put(req, resp.clone());
           await trimCache(cacheName, maxEntries);
         } catch (_) { /* ignore put/trim errors */ }
       }
-
       return resp;
-    } catch (err) {
-      // 3) Si falla la red y no hay cache, error (o puedes devolver un fallback)
+    } catch {
+      // 3.3 Sin red y no está en caché
       return Response.error();
     }
   })());

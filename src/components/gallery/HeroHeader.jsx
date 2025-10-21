@@ -1,5 +1,5 @@
 // src/components/gallery/HeroHeader.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { ChevronDown, Download, Play, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -82,22 +82,44 @@ const HeroHeader = ({
       }
     };
 
+  // --- Asegurar primer paint borroso antes de marcar loaded (incluye imágenes en caché) ---
+  const imgRef = useRef(null);
+  const triggerLoaded = useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => setHeroLoaded(true));
+    });
+  }, [setHeroLoaded]);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img?.complete) {
+      triggerLoaded();
+    }
+  }, [triggerLoaded]);
+
   return (
     <>
       <section className="hero-grid">
         <div className="hero-bg">
           <img
+            ref={imgRef}
             src={coverUrl}
             alt="Portada del evento"
             decoding="async"
             fetchpriority="high"
             className={heroLoaded ? 'loaded' : ''}
-            onLoad={() => setHeroLoaded(true)}
+            onLoad={triggerLoaded}
             style={{
-              filter: 'var(--hero-image-filter, blur(6px))',
-              opacity: 'var(--hero-image-opacity, 0.85)',
+              // Cambia de borroso→nítido y de opaco→visible según heroLoaded, respetando tus tiempos
+              filter: heroLoaded
+                ? 'var(--hero-image-filter-final, blur(0px))'
+                : 'var(--hero-image-filter, blur(6px))',
+              opacity: heroLoaded
+                ? 'var(--hero-image-opacity-final, 1)'
+                : 'var(--hero-image-opacity, 0.85)',
+              // Mantengo tu transform tal cual (sin animarlo) para no tocar el diseño
               transform: 'var(--hero-image-transform, scale(1.05))',
-              transition: 'filter .5s ease, opacity .4s ease',
+              transition: 'filter 2s cubic-bezier(.22,1,.36,1), opacity 1.5s cubic-bezier(.22,1,.36,1)',
             }}
           />
           <div
