@@ -401,7 +401,11 @@ const EventGallery = () => {
 
         // 3) Si el caché es “fresco”, no toques la BD
         const freshEnough = cached?.savedAt && (Date.now() - cached.savedAt) < CACHE_TTL_MS;
-        if (freshEnough) return;
+        // 👇 Solo omite el fetch si además HAY items en caché
+        if (freshEnough && (cached?.items?.length ?? 0) > 0) {
+          setLoading(false);
+          return;
+        }
 
 
         // 4) Cache ausente o vencido → 1 sola llamada: primera página + count
@@ -538,7 +542,7 @@ const EventGallery = () => {
     };
     const seen = new Set();
     return filteredByCategory
-      .filter(u => u.type === 'video' || !!u.web_url)
+      .filter(u => u.type === 'video' || !!(u.web_url || u.thumb_url || u.file_url))
       .filter(u => {
         if (u.type === 'video') return true;
         const k = baseKey(u);

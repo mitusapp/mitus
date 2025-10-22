@@ -165,7 +165,7 @@ const EventSettings = () => {
       // base64 seguro para Unicode
       const base64 = btoa(unescape(encodeURIComponent(payload)));
       // Usa la ruta directa a la galería (sin /gallery)
-      const url = `/event/${eventId}?tpl=draft&d=${encodeURIComponent(base64)}`;
+      const url = `/event/${eventId}/gallery?tpl=draft&d=${encodeURIComponent(base64)}`;
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (e) {
       console.error('Error al preparar vista previa:', e);

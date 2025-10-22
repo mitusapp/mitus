@@ -26,19 +26,66 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
     }
   };
 
-  // Prefetch next/prev para imágenes
+  // -------- OPTIMIZACIÓN: Prefetch prudente y cancelable (2 imágenes máx.) --------
+  const preloadedRef = useRef(new Map()); // url -> true
+  const abortRef = useRef({});            // url -> AbortController
+  const srcOf = (u) => u?.web_url || u?.thumb_url || null; // nunca originales para fotos
+
   useEffect(() => {
-    const preload = (i) => {
-      const u = uploads[i];
-      if (!u || u.type === 'video') return;
-      const img = new Image();
-      img.src = (u.web_url || u.file_url);
-    };
-    if (uploads.length) {
-      preload((currentIndex + 1) % uploads.length);
-      preload((currentIndex - 1 + uploads.length) % uploads.length);
+    if (!uploads?.length) return;
+    const N = 1; // prefetch simétrico: 1 por delante y 1 por detrás (total 2)
+
+    let alive = true;
+    const controllers = [];
+
+    const len = uploads.length;
+    const indices = [];
+    for (let step = 1; step <= N; step++) {
+      indices.push((currentIndex + step) % len);                        // siguiente
+      indices.push((currentIndex - step + len) % len);                  // anterior
     }
+
+    for (const i of indices) {
+      const u = uploads[i];
+      if (!u || u.type === 'video') continue;
+      const url = srcOf(u);
+      if (!url || preloadedRef.current.has(url)) continue;
+
+      const ctrl = new AbortController();
+      abortRef.current[url] = ctrl;
+      controllers.push([url, ctrl]);
+
+      // Descarga controlada (para poder abortar). Evita tocar originales.
+      fetch(url, { signal: ctrl.signal })
+        .then(r => r.blob())
+        .then(() => {
+          if (!alive) return;
+          preloadedRef.current.set(url, true);
+        })
+        .catch(() => { /* ignoramos abort/errores */ });
+    }
+
+    // Limpieza específica de este ciclo
+    return () => {
+      alive = false;
+      for (const [url, ctrl] of controllers) {
+        try { ctrl.abort(); } catch {}
+        delete abortRef.current[url];
+      }
+    };
   }, [currentIndex, uploads]);
+
+  // Limpieza total al desmontar
+  useEffect(() => {
+    return () => {
+      for (const ctrl of Object.values(abortRef.current)) {
+        try { ctrl.abort(); } catch {}
+      }
+      abortRef.current = {};
+      preloadedRef.current.clear();
+    };
+  }, []);
+  // -------------------------------------------------------------------------------
 
   const goToNext = useCallback(() => setCurrentIndex(prev => (prev + 1) % uploads.length), [uploads.length]);
   const goToPrev = useCallback(() => setCurrentIndex(prev => (prev - 1 + uploads.length) % uploads.length), [uploads.length]);
@@ -66,6 +113,7 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
       return;
     }
 
+    // Nota: mantenemos la prioridad original (original -> web -> thumb)
     const url = currentMedia.file_url || currentMedia.web_url || currentMedia.thumb_url;
     if (!url) {
       toast({ title: 'No hay archivo disponible para descargar', variant: 'destructive' });
@@ -80,8 +128,13 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
     a.remove();
   };
 
+  // -------- OPTIMIZACIÓN: fotos usan derivados; video usa original --------
+  const mediaUrl =
+    currentMedia.type === 'video'
+      ? currentMedia.file_url
+      : (currentMedia.web_url || currentMedia.thumb_url);
+  // -----------------------------------------------------------------------
 
-  const mediaUrl = currentMedia.type === 'video' ? currentMedia.file_url : (currentMedia.web_url || currentMedia.file_url);
   const displayName = currentMedia.file_name || currentMedia.title || (currentMedia.file_url ? currentMedia.file_url.split('/').pop().split('?')[0] : '');
 
   return (
@@ -180,6 +233,7 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
                     src={mediaUrl}
                     controls
                     autoPlay
+                    preload="metadata"   // OPTIMIZACIÓN: no bajar el video completo de entrada
                     className="lightbox-media"
                     style={{
                       filter: 'var(--lightbox-media-filter, none)',
@@ -199,6 +253,8 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
                     alt={currentMedia.title || 'Foto del evento'}
                     className="lightbox-media"
                     decoding="async"
+                    loading="eager"        // OPTIMIZACIÓN: la visible primero
+                    fetchpriority="high"   // OPTIMIZACIÓN: prioridad de red
                     style={{
                       filter: 'var(--lightbox-media-filter, none)',
                       transition: 'var(--lightbox-media-transition, filter .25s ease)',

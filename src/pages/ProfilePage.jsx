@@ -1,7 +1,7 @@
 // src/pages/ProfilePage.jsx
 import React, { useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   Calendar,
   Percent,
@@ -71,15 +71,18 @@ const startOfDay = (d) => {
 };
 const daysUntil = (dateStr) => {
   const today = startOfDay(new Date());
-  const eventDate = startOfDay(new Date(dateStr.replace(/-/g, '/')));
+  const eventDate = startOfDay(new Date(String(dateStr || '').replace(/-/g, '/')));
+  if (Number.isNaN(eventDate.getTime())) return NaN;
   const diffMs = eventDate - today;
   return Math.floor(diffMs / 86400000); // 0 = hoy, 1 = falta 1 día, >1 faltan n días, <0 pasado
 };
+
 
 const ProfilePage = () => {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const { isDevHelperVisible, setIsDevHelperVisible } = useDevHelper();
 
@@ -170,8 +173,9 @@ const ProfilePage = () => {
   useEffect(() => {
     if (location.state?.refreshEvents) {
       queryClient.invalidateQueries({ queryKey: ['events', user?.id] });
-      // limpiar el state para evitar refetches no deseados al volver atrás
-      navigate(location.pathname, { replace: true });
+      queryClient.refetchQueries({ queryKey: ['events', user?.id] });
+      // limpiar el state PERO preservando el query string actual (?filter=...&sort=...&q=...)
+      navigate({ pathname: location.pathname, search: location.search }, { replace: true });
     }
   }, [location.state?.refreshEvents, queryClient, user?.id, navigate, location.pathname]);
 
@@ -191,9 +195,25 @@ const ProfilePage = () => {
     });
   }, [rawEvents]);
 
-  const [filter, setFilter] = React.useState('all');
-  const [sort, setSort] = React.useState('upcoming');
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const [filter, setFilter] = React.useState(searchParams.get('filter') ?? 'all');
+  const [sort, setSort] = React.useState(searchParams.get('sort') ?? 'upcoming');
+  const [searchQuery, setSearchQuery] = React.useState(searchParams.get('q') ?? '');
+
+  // Mantener filter/sort/q en el URL para que persistan al volver con "Atrás"
+  React.useEffect(() => {
+    const next = new URLSearchParams(location.search);
+    next.set('filter', filter);
+    next.set('sort', sort);
+    if (searchQuery && searchQuery.trim()) {
+      next.set('q', searchQuery.trim());
+    } else {
+      next.delete('q');
+    }
+    // Evita push de nuevas entradas en el historial
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, sort, searchQuery]);
+
 
   const filteredAndSortedEvents = useMemo(() => {
     let result = [...events];
@@ -223,6 +243,20 @@ const ProfilePage = () => {
               new Date(a.date.replace(/-/g, '/')) - new Date(b.date.replace(/-/g, '/'))
           );
         break;
+      case 'past': {
+        // Mostrar solo eventos con fecha **anterior** a hoy.
+        // Se ordenan del más reciente (pasado cercano) al más antiguo.
+        const toTime = (d) => new Date(String(d || '').replace(/-/g, '/')).getTime();
+        const nowTs = now.getTime();
+        result = result
+          .filter((e) => {
+            const t = toTime(e.date);
+            return !Number.isNaN(t) && t < nowTs;
+          })
+          .sort((a, b) => toTime(b.date) - toTime(a.date));
+        break;
+      }
+
       case 'date-desc':
         result.sort(
           (a, b) =>
@@ -370,6 +404,7 @@ const ProfilePage = () => {
                 <option value="progress-desc">Progreso (mayor)</option>
                 <option value="progress-asc">Progreso (menor)</option>
                 <option value="urgent-tasks">Tareas Urgentes</option>
+                <option value="past">Eventos realizados</option>
               </select>
             </div>
 
@@ -377,8 +412,10 @@ const ProfilePage = () => {
               <div className="space-y-6">
                 {filteredAndSortedEvents.map((event) => {
                   const hosts = event.invitation_details?.hosts?.join(' y ');
-                  const eventDate = new Date(event.date.replace(/-/g, '/'));
-                  const until = daysUntil(event.date);
+                  const eventDate = new Date(String(event.date || '').replace(/-/g, '/'));
+                  const isValidDate = !Number.isNaN(eventDate.getTime());
+                  const until = isValidDate ? daysUntil(event.date) : null;
+
 
                   return (
                     <motion.div
@@ -435,13 +472,11 @@ const ProfilePage = () => {
                           {/* Fecha + etiqueta de días restantes */}
                           <p className="text-[#5E5E5E] flex items-center gap-2 text-sm mb-2">
                             <Calendar className="w-4 h-4 text-[#8ABBD6]" />
-                            {eventDate.toLocaleDateString('es-ES', {
-                              year: 'numeric',
-                              month: 'long',
-                              day: 'numeric',
-                            })}
+                            {isValidDate
+                              ? eventDate.toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })
+                              : 'Sin fecha'}
                           </p>
-                          {until >= 0 && (
+                          {until !== null && until >= 0 && (
                             <span className="inline-flex items-center text-xs font-medium text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
                               {until === 0
                                 ? 'Hoy'
@@ -450,6 +485,7 @@ const ProfilePage = () => {
                                   : `Faltan ${until} días`}
                             </span>
                           )}
+
                         </div>
 
                         {/* Barra de avance con degradado neutral */}

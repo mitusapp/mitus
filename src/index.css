@@ -48,22 +48,31 @@ body {
     radial-gradient(at 80% 80%, hsla(190, 70%, 40%, 0.2) 0px, transparent 50%);
 }
 
-/* Custom scrollbar */
+/* === Custom scrollbar (global) === */
+/* Pega este bloque en src/index.css y reemplaza el anterior */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
+  height: 10px;
 }
-
 ::-webkit-scrollbar-track {
-  @apply bg-slate-900/50;
+  background: #ffffff; /* fondo blanco */
 }
-
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-500/50 rounded-full;
+  background: rgba(163, 163, 163, 0.55); /* gris sutil */
+  border-radius: 9999px;
+  border: 2px solid #ffffff; /* “gap” visual sobre el track blanco */
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 113, 0.7); /* un poco más oscuro al hover */
 }
 
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-700/80;
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(163, 163, 163, 0.55) #ffffff; /* thumb | track */
 }
+
+
 
 /* Custom focus styles */
 input:focus, textarea:focus, select:focus, button:focus-visible {
