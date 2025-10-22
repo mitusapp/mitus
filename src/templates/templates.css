@@ -1,0 +1,128 @@
+/* --- Contenedor principal del hero (portada) --- */
+.hero-surface {
+  position: relative;
+  overflow: hidden;
+
+  /* Fondo controlado por plantilla */
+  --hero-image: none;
+  background-image: var(--hero-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  /* Overlay/velo opcional (gradiente) */
+  --hero-overlay: none;
+  min-height: min(78vh, 860px);
+}
+
+.hero-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--hero-overlay);
+  z-index: 1;
+}
+
+/* Zona segura de contenido (evita solape con decor) */
+.hero-safe {
+  position: relative;
+  z-index: 3; /* por encima de decor */
+  padding-inline: clamp(16px, 4vw, 48px);
+  padding-top: clamp(24px, 6vh, 72px);
+  padding-bottom: clamp(24px, 6vh, 72px);
+}
+
+/* --- Decor genérico (slots PNG) --- */
+.decor-slot {
+  position: absolute;
+  z-index: 2; /* por encima de overlay, debajo de texto */
+  pointer-events: none;
+  transform-origin: center;
+  will-change: transform, opacity, filter;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* Hijo animado: hereda el background del wrapper sin tocar su transform de anclaje */
+.decor-inner {
+  width: 100%;
+  height: 100%;
+  background-image: inherit;
+  background-size: inherit;
+  background-repeat: inherit;
+  background-position: inherit;
+  will-change: transform, opacity;
+}
+
+/* Tamaños por defecto (puedes sobreescribir con variables si quieres) */
+:root {
+  /* FIX: el clamp tenía min > max. Se invierte el orden. */
+  --decor-w-default: clamp(420px, 24vmin, 500px);
+  --decor-ar-default: 1.6; /* ancho/alto aproximado, ajusta si hace falta */
+}
+
+/* TOP-LEFT: anclado a la esquina, sin translate */
+.decor-topLeft {
+  left: var(--decor-topLeft-x, 0);
+  top: var(--decor-topLeft-y, 0);
+  width: var(--decor-topLeft-w, var(--decor-w-default));
+  aspect-ratio: var(--decor-topLeft-ar, var(--decor-ar-default));
+  opacity: var(--decor-topLeft-opacity, 1);
+  background-image: var(--decor-topLeft-image, none);
+  /* Posición del contenido dentro del slot para “pegar” visualmente a la esquina */
+  background-position: var(--decor-topLeft-pos, left top);
+  transform:
+    rotate(var(--decor-topLeft-rotate, 0deg)) scale(var(--decor-topLeft-scale, 1));
+}
+
+/* TOP-RIGHT: anclado a la derecha; compensamos con translateX(-100%) */
+.decor-topRight {
+  left: var(--decor-topRight-x, 100%);
+  top: var(--decor-topRight-y, 0);
+  width: var(--decor-topRight-w, var(--decor-w-default));
+  aspect-ratio: var(--decor-topRight-ar, var(--decor-ar-default));
+  opacity: var(--decor-topRight-opacity, 0.9);
+  background-image: var(--decor-topRight-image, none);
+  background-position: var(--decor-topRight-pos, right top);
+  transform:
+    translate(-100%, 0) rotate(var(--decor-topRight-rotate, 0deg)) scale(var(--decor-topRight-scale, 1));
+}
+
+/* BOTTOM: centrado horizontal y pegado abajo */
+.decor-bottom {
+  left: var(--decor-bottom-x, 50%);
+  top: var(--decor-bottom-y, 100%);
+  width: var(--decor-bottom-w, var(--decor-w-default));
+  aspect-ratio: var(--decor-bottom-ar, var(--decor-ar-default));
+  opacity: var(--decor-bottom-opacity, 1);
+  background-image: var(--decor-bottom-image, none);
+  background-position: var(--decor-bottom-pos, center bottom);
+  transform:
+    translate(-50%, -100%) rotate(var(--decor-bottom-rotate, 0deg)) scale(var(--decor-bottom-scale, 1));
+}
+
+/* Accesibilidad: reduce motion */
+@media (prefers-reduced-motion: reduce) {
+  .decor-slot,
+  .decor-inner {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* Capa de textura (grain) sobre el fondo y bajo el decor */
+.hero-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--hero-grain-image);
+  background-repeat: repeat;
+  background-size: auto; /* usa 'cover' si exportaste grain grande */
+  mix-blend-mode: overlay; /* prueba 'soft-light' según el template */
+  opacity: var(--hero-grain-opacity, 0.22);
+  z-index: 1;
+  /* fondo < ::before overlay (1) < ::after grain (1) < decor (2) < contenido (3) */
+}

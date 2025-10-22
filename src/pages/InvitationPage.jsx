@@ -1,48 +1,60 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Calendar, MapPin, Gift, Music, Camera, MessageSquare, Clock, Users, Shirt, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { loadTemplate } from '@/templates/loader';
+import { applyTemplateTokens, clearTemplateTokens } from '@/templates/tokenBridge';
+import HeroLayers from '@/components/gallery/HeroLayers';
+import { DateTime } from 'luxon';
 
-const Countdown = ({ date }) => {
-  const calculateTimeLeft = useCallback(() => {
-    const difference = +new Date(date) - +new Date();
-    let timeLeft = {};
-    if (difference > 0) {
-      timeLeft = {
-        días: Math.floor(difference / (1000 * 60 * 60 * 24)),
-        horas: Math.floor((difference / (1000 * 60 * 60)) % 24),
-        minutos: Math.floor((difference / 1000 / 60) % 60),
-        segundos: Math.floor((difference / 1000) % 60),
-      };
-    }
-    return timeLeft;
-  }, [date]);
 
-  const [timeLeft, setTimeLeft] = useState(calculateTimeLeft());
 
+const Countdown = ({ date, time = '00:00', timeZone = 'America/Bogota' }) => {
+  const getTargetMillis = useCallback(() => {
+    // Construye un instante absoluto desde fecha+hora EN la zona del evento
+    const dt = DateTime.fromISO(`${date}T${(time || '00:00').slice(0, 5)}`, { zone: timeZone });
+    if (!dt.isValid) return null;
+    return dt.toUTC().toMillis(); // instante absoluto
+  }, [date, time, timeZone]);
+
+  const calc = useCallback(() => {
+    const target = getTargetMillis();
+    if (!target) return null;
+    const diff = target - Date.now();
+    if (diff <= 0) return null;
+    const s = Math.floor(diff / 1000);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return { días: d, horas: h, minutos: m, segundos: sec };
+  }, [getTargetMillis]);
+
+  const [timeLeft, setTimeLeft] = useState(calc());
   useEffect(() => {
-    const timer = setTimeout(() => setTimeLeft(calculateTimeLeft()), 1000);
-    return () => clearTimeout(timer);
-  });
+    const id = setInterval(() => setTimeLeft(calc()), 1000);
+    return () => clearInterval(id);
+  }, [calc]);
 
-  if (Object.keys(timeLeft).length === 0) return null;
+  if (!timeLeft) return null;
 
   return (
     <div className="flex justify-center gap-4 md:gap-8">
       {Object.entries(timeLeft).map(([unit, value]) => (
         <div key={unit} className="text-center bg-white/10 backdrop-blur-sm p-4 rounded-lg border border-white/20 w-24">
-          <div className="text-4xl md:text-5xl font-bold text-white">{value.toString().padStart(2, '0')}</div>
+          <div className="text-4xl md:text-5xl font-bold text-white">{String(value).padStart(2, '0')}</div>
           <div className="text-xs uppercase text-gray-300 tracking-widest">{unit}</div>
         </div>
       ))}
     </div>
   );
 };
+
 
 const RsvpForm = ({ onSubmit, eventId }) => {
   const [formData, setFormData] = useState({ name: '', attending: 'yes', party_size: 1, message: '' });
@@ -69,11 +81,11 @@ const RsvpForm = ({ onSubmit, eventId }) => {
     <form onSubmit={handleSubmit} className="space-y-4 text-left">
       <div>
         <label className="block text-sm font-medium text-gray-200 mb-2">Tu nombre completo</label>
-        <input type="text" placeholder="Tu nombre completo" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} required className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
+        <input type="text" placeholder="Tu nombre completo" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
       </div>
       <div>
         <label className="block text-sm font-medium text-gray-200 mb-2">¿Asistirás?</label>
-        <select value={formData.attending} onChange={(e) => setFormData({...formData, attending: e.target.value})} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white">
+        <select value={formData.attending} onChange={(e) => setFormData({ ...formData, attending: e.target.value })} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white">
           <option value="yes">Sí, asistiré</option>
           <option value="no">No podré asistir</option>
         </select>
@@ -81,12 +93,12 @@ const RsvpForm = ({ onSubmit, eventId }) => {
       {formData.attending === 'yes' && (
         <div>
           <label className="block text-sm font-medium text-gray-200 mb-2">Nº de asistentes (incluyéndote)</label>
-          <input type="number" min="1" placeholder="Nº de asistentes" value={formData.party_size} onChange={(e) => setFormData({...formData, party_size: parseInt(e.target.value) || 1})} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
+          <input type="number" min="1" placeholder="Nº de asistentes" value={formData.party_size} onChange={(e) => setFormData({ ...formData, party_size: parseInt(e.target.value) || 1 })} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
         </div>
       )}
       <div>
         <label className="block text-sm font-medium text-gray-200 mb-2">Mensaje adicional (alergias, etc.)</label>
-        <textarea placeholder="Mensaje adicional" value={formData.message} onChange={(e) => setFormData({...formData, message: e.target.value})} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
+        <textarea placeholder="Mensaje adicional" value={formData.message} onChange={(e) => setFormData({ ...formData, message: e.target.value })} className="w-full p-3 rounded bg-white/10 border border-white/20 text-white" />
       </div>
       <DialogFooter>
         <Button type="submit" className="bg-purple-600 hover:bg-purple-700" disabled={isSubmitting}>
@@ -104,6 +116,21 @@ const InvitationPage = () => {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ isOpen: false, content: null, title: '' });
   const [songSuggestion, setSongSuggestion] = useState('');
+  const [manifest, setManifest] = useState(null);
+
+  // === Paso 6: integración de plantillas ===
+  const heroRef = useRef(null);
+  const location = useLocation();
+
+  const tplKey = useMemo(() => {
+    const qp = new URLSearchParams(location.search);
+    return (
+      qp.get('tpl') ||
+      event?.settings?.design?.template_key ||
+      'eucalyptus-watercolor'
+    );
+  }, [location.search, event?.settings?.design?.template_key]);
+
 
   const fetchEventData = useCallback(async () => {
     setLoading(true);
@@ -118,6 +145,40 @@ const InvitationPage = () => {
   }, [eventId, navigate]);
 
   useEffect(() => { fetchEventData(); }, [fetchEventData]);
+  // Aplica variables CSS del template al contenedor del hero
+  useEffect(() => {
+    if (!heroRef.current) return;
+
+    const m = loadTemplate(tplKey) || loadTemplate('eucalyptus-watercolor');
+    if (!m) return;
+    setManifest(m);
+
+    const mq = window.matchMedia('(max-width: 768px)');
+
+    const applyAll = () => {
+      if (!heroRef.current) return;
+      clearTemplateTokens(heroRef.current);
+      applyTemplateTokens(heroRef.current, m, mq.matches);
+
+      // Compatibilidad: si el evento tiene cover_image_url, úsalo como fondo
+      if (event?.cover_image_url) {
+        heroRef.current.style.setProperty('--hero-image', `url("${event.cover_image_url}")`);
+      }
+    };
+
+    applyAll();
+
+    // Soporte moderno y Safari
+    if (mq.addEventListener) mq.addEventListener('change', applyAll);
+    else if (mq.addListener) mq.addListener(applyAll);
+
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', applyAll);
+      else if (mq.removeListener) mq.removeListener(applyAll);
+      if (heroRef.current) clearTemplateTokens(heroRef.current);
+    };
+  }, [tplKey, event?.cover_image_url]);
+
 
   const handleGuestAccess = (action) => {
     const guestName = sessionStorage.getItem('guestName') || prompt('Por favor, ingresa tu nombre para continuar:');
@@ -167,7 +228,7 @@ const InvitationPage = () => {
     }
     setModal({ isOpen: true, content, title });
   };
-  
+
   const handleViewOnMap = (loc) => {
     let url;
     if (loc.lat && loc.lng) {
@@ -194,15 +255,44 @@ const InvitationPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      <section className="relative h-screen flex items-center justify-center text-center overflow-hidden">
-        <div className="absolute inset-0 bg-black/60 z-10"></div>
-        {event.cover_image_url ? <img src={event.cover_image_url} alt="Portada del evento" className="absolute inset-0 w-full h-full object-cover" /> : <div className="absolute inset-0 bg-gradient-to-br from-purple-900 to-blue-900"></div>}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1, delay: 0.2 }} className="relative z-20 p-4">
-          <h2 className="text-2xl md:text-4xl font-light tracking-widest mb-4">{details.hosts?.join(' y ') || 'Te invitan a'}</h2>
-          <h1 className="text-5xl md:text-8xl font-bold mb-8" style={{ fontFamily: "'Playfair Display', serif" }}>{event.title}</h1>
-          {details.countdown && <Countdown date={`${event.date}T${details.eventTime || '00:00:00'}`} />}
+      <section ref={heroRef} className="hero-surface relative h-screen flex items-center justify-center text-center overflow-hidden">
+        {/* Capas decorativas PNG con animación; se alimentan de CSS vars */}
+        <HeroLayers
+          sequence={manifest?.defaults?.animation?.sequence}
+          parallaxStrength={manifest?.defaults?.animation?.parallax?.strength ?? 8}
+        />
+
+
+        {/* Contenido existente dentro de zona segura (encima del decor) */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 1, delay: 0.2 }}
+          className="hero-safe relative z-20 p-4 w-full"
+        >
+          <h2 className="text-2xl md:text-4xl font-light tracking-widest mb-4">
+            {details.hosts?.join(' y ') || 'Te invitan a'}
+          </h2>
+
+          <h1
+            className="text-5xl md:text-8xl font-bold mb-8"
+            style={{ fontFamily: "'Playfair Display', serif" }}
+          >
+            {event.title}
+          </h1>
+
+          {details.countdown && (
+            <Countdown
+              date={event.date}
+              time={details.eventTime || '00:00'}
+              timeZone={event?.event_timezone || 'America/Bogota'}
+            />
+          )}
+
+
         </motion.div>
       </section>
+
 
       <main>
         <Section>
@@ -222,7 +312,19 @@ const InvitationPage = () => {
                     <div className="bg-purple-500/20 p-3 rounded-lg"><MapPin className="w-6 h-6 text-purple-300" /></div>
                     <h3 className="text-2xl font-semibold text-white">{loc.title}</h3>
                   </div>
-                  <p className="text-gray-300 mb-1 flex items-center"><Clock className="w-4 h-4 mr-2" />{loc.time ? new Date(`1970-01-01T${loc.time}`).toLocaleTimeString('es-ES', { hour: 'numeric', minute: '2-digit' }) : 'Hora por confirmar'}</p>
+                  <p className="text-gray-300 mb-1 flex items-center">
+                    <Clock className="w-4 h-4 mr-2" />
+                    {(() => {
+                      if (!loc.time) return 'Hora por confirmar';
+                      const tz = event?.event_timezone || 'America/Bogota';
+                      const hhmm = String(loc.time).slice(0, 5) || '00:00';
+                      const dt = DateTime.fromISO(`${event.date}T${hhmm}`, { zone: tz });
+                      if (!dt.isValid) return 'Hora por confirmar';
+                      // Hora en zona del evento (ej. 5:00 p. m.)
+                      return `${dt.toLocaleString(DateTime.TIME_SIMPLE)} (${tz})`;
+                    })()}
+                  </p>
+
                   <p className="text-gray-300 mb-4">{loc.address}</p>
                   <Button onClick={() => handleViewOnMap(loc)} variant="outline" className="border-white/20 text-white hover:bg-white/10">Ver en Mapa</Button>
                 </div>

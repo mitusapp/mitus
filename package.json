@@ -33,6 +33,7 @@
     "framer-motion": "^10.16.4",
     "jszip": "^3.10.1",
     "lucide-react": "^0.285.0",
+    "luxon": "^3.7.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-helmet": "^6.1.0",
