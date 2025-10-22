@@ -1,7 +1,7 @@
 // public/sw-mitus.js
 const THUMBS = 'mitus-thumbs-v1';
 const WEB    = 'mitus-web-v1';
-const APP_SHELL = 'app-shell';
+const APP_SHELL = 'app-shell-v2'; // ⬅️ bump para forzar index nuevo
 const MAX_THUMBS = 5000;
 const MAX_WEB    = 1500;
 
@@ -16,11 +16,12 @@ async function trimCache(cacheName, maxEntries) {
 }
 
 self.addEventListener('install', (event) => {
-  // Precargar el "app shell" para navegación offline
+  // Precargar el "app shell" para navegación offline (siempre el index ACTUAL)
   event.waitUntil((async () => {
     try {
       const cache = await caches.open(APP_SHELL);
-      await cache.addAll(['/index.html']);
+      const res = await fetch('/index.html', { cache: 'no-store' });
+      if (res.ok) await cache.put('/index.html', res.clone());
     } catch (e) {
       // ignora errores de precache (no bloquea la instalación)
     }
@@ -29,6 +30,14 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  // Purga caches viejos de app-shell u otros desconocidos
+  event.waitUntil((async () => {
+    const keep = new Set([THUMBS, WEB, APP_SHELL]);
+    const names = await caches.keys();
+    await Promise.all(
+      names.map((n) => (keep.has(n) ? Promise.resolve() : caches.delete(n)))
+    );
+  })());
   self.clients.claim();
 });
 
@@ -40,7 +49,8 @@ self.addEventListener('fetch', (event) => {
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       try {
-        return await fetch(req);
+        // Evita servir un index antiguo por caches intermedios
+        return await fetch(req, { cache: 'no-store' });
       } catch {
         const cache = await caches.open(APP_SHELL);
         const cached = await cache.match('/index.html');
