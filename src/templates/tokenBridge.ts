@@ -30,16 +30,39 @@ export function applyTemplateTokens(
 ) {
   const d = manifest.defaults ?? {};
 
-  // Fondo y overlay
+  // === Fondo y overlay (plantilla) ===
   setVar(el, "--hero-image", urlOrNone(manifest.assets?.background));
-  setVar(el, "--hero-overlay", d.overlay || "none");
+  setVar(el, "--hero-overlay", (d as any).overlay || "none");
 
-  // (Opcional) textura/grain — aún no la usamos en CSS, pero dejamos el token listo
+  // === Grano (textura) ===
+  // Imagen (asset)
   setVar(el, "--hero-grain-image", urlOrNone(manifest.assets?.grain));
 
-  // Decor (elige set móvil si existe)
-  const baseDecor = d.decor ?? ({} as any);
-  const mobileDecor = d.mobile?.decor ?? ({} as any);
+  // Propiedades del grano desde defaults + overrides mobile (opcional)
+  const baseGrain = (d as any).grain ?? {};
+  const mobileGrain = (d as any)?.mobile?.grain ?? {};
+  const activeGrain = isMobile ? { ...baseGrain, ...mobileGrain } : baseGrain;
+
+  // repeat: "repeat" | "no-repeat"
+  if (activeGrain.repeat !== undefined) {
+    setVar(el, "--hero-grain-repeat", activeGrain.repeat);
+  }
+  // size: px, %, 'cover', 'contain', etc.
+  if (activeGrain.size !== undefined) {
+    setVar(el, "--hero-grain-size", activeGrain.size);
+  }
+  // blend: 'overlay' | 'soft-light' | 'multiply' | 'normal'...
+  if (activeGrain.blend !== undefined) {
+    setVar(el, "--hero-grain-blend", activeGrain.blend);
+  }
+  // opacity: 0..1
+  if (activeGrain.opacity !== undefined) {
+    setVar(el, "--hero-grain-opacity", activeGrain.opacity);
+  }
+
+  // === Decor (elige set móvil si existe) ===
+  const baseDecor = (d as any).decor ?? {};
+  const mobileDecor = (d as any)?.mobile?.decor ?? {};
   const activeDecor = isMobile ? { ...baseDecor, ...mobileDecor } : baseDecor;
 
   SLOTS.forEach((slot) => {
@@ -51,7 +74,6 @@ export function applyTemplateTokens(
     setVar(el, `--decor-${slot}-image`, urlOrNone(imgUrl));
 
     // Posición/transform/visibilidad
-    // x, y pueden ser %, px, clamp(), calc()… (los dejamos tal cual)
     if (v.x !== undefined) setVar(el, `--decor-${slot}-x`, v.x);
     if (v.y !== undefined) setVar(el, `--decor-${slot}-y`, v.y);
 
@@ -60,18 +82,23 @@ export function applyTemplateTokens(
     if (v.rotate !== undefined) setVar(el, `--decor-${slot}-rotate`, `${v.rotate}deg`);
     if (v.opacity !== undefined) setVar(el, `--decor-${slot}-opacity`, v.opacity);
 
-    // Soporte opcional: si algún manifest define ancho/aspect ratio
-    // (no es obligatorio; tu CSS ya tiene defaults)
+    // Opcional: ancho y aspect ratio
     if (v.w !== undefined) setVar(el, `--decor-${slot}-w`, v.w);
     if (v.ar !== undefined) setVar(el, `--decor-${slot}-ar`, v.ar);
   });
 
-  // (Opcional futuro) fuentes/paleta — aquí solo exponemos como CSS vars si lo deseas
-  // setVar(el, "--font-family-heading", d.fonts?.heading);
-  // setVar(el, "--font-family-body", d.fonts?.body);
-  // setVar(el, "--color-bg", d.palette?.bg);
-  // setVar(el, "--color-fg", d.palette?.fg);
-  // setVar(el, "--color-accent", d.palette?.accent);
+  // === Fuentes y colores (activado) ===
+  const fonts = (d as any).fonts ?? {};
+  const palette = (d as any).palette ?? {};
+
+  // Tipografías
+  if (fonts.heading !== undefined) setVar(el, "--font-family-heading", fonts.heading);
+  if (fonts.body !== undefined) setVar(el, "--font-family-body", fonts.body);
+
+  // Colores
+  if (palette.bg !== undefined) setVar(el, "--color-bg", palette.bg);
+  if (palette.fg !== undefined) setVar(el, "--color-fg", palette.fg);
+  if (palette.accent !== undefined) setVar(el, "--color-accent", palette.accent);
 }
 
 /**
@@ -80,9 +107,18 @@ export function applyTemplateTokens(
  */
 export function clearTemplateTokens(el: HTMLElement) {
   const names = [
+    // Fondo / overlay (plantilla)
     "--hero-image",
     "--hero-overlay",
+
+    // Grano
     "--hero-grain-image",
+    "--hero-grain-repeat",
+    "--hero-grain-size",
+    "--hero-grain-blend",
+    "--hero-grain-opacity",
+
+    // Decor por slot
     ...SLOTS.flatMap((slot) => [
       `--decor-${slot}-image`,
       `--decor-${slot}-x`,
@@ -93,6 +129,13 @@ export function clearTemplateTokens(el: HTMLElement) {
       `--decor-${slot}-w`,
       `--decor-${slot}-ar`,
     ]),
+
+    // Fuentes y colores
+    "--font-family-heading",
+    "--font-family-body",
+    "--color-bg",
+    "--color-fg",
+    "--color-accent",
   ];
   names.forEach((n) => el.style.removeProperty(n));
 }

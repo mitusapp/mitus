@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -160,9 +159,11 @@ const InvitationPage = () => {
       clearTemplateTokens(heroRef.current);
       applyTemplateTokens(heroRef.current, m, mq.matches);
 
-      // Compatibilidad: si el evento tiene cover_image_url, úsalo como fondo
+      // Portada: escribir en --hero-cover-image (no en --hero-image)
       if (event?.cover_image_url) {
-        heroRef.current.style.setProperty('--hero-image', `url("${event.cover_image_url}")`);
+        heroRef.current.style.setProperty('--hero-cover-image', `url("${event.cover_image_url}")`);
+      } else {
+        heroRef.current.style.removeProperty('--hero-cover-image'); // vuelve al default 'none'
       }
     };
 
@@ -254,8 +255,8 @@ const InvitationPage = () => {
   const Section = ({ children }) => <motion.section initial={{ opacity: 0, y: 50 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.3 }} transition={{ duration: 0.7 }} className="py-16 px-4">{children}</motion.section>;
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      <section ref={heroRef} className="hero-surface relative h-screen flex items-center justify-center text-center overflow-hidden">
+    <div className="min-h-screen bg-slate-900 text-white body-font">
+      <section ref={heroRef} className="hero-surface relative isolate h-screen flex items-center justify-center text-center overflow-hidden">
         {/* Capas decorativas PNG con animación; se alimentan de CSS vars */}
         <HeroLayers
           sequence={manifest?.defaults?.animation?.sequence}
@@ -268,16 +269,13 @@ const InvitationPage = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 1, delay: 0.2 }}
-          className="hero-safe relative z-20 p-4 w-full"
+          className="hero-safe relative z-20 p-4 w-full text-theme"
         >
-          <h2 className="text-2xl md:text-4xl font-light tracking-widest mb-4">
+          <h2 className="text-2xl md:text-4xl font-light tracking-widest mb-4 heading-font">
             {details.hosts?.join(' y ') || 'Te invitan a'}
           </h2>
 
-          <h1
-            className="text-5xl md:text-8xl font-bold mb-8"
-            style={{ fontFamily: "'Playfair Display', serif" }}
-          >
+          <h1 className="text-5xl md:text-8xl font-bold mb-8 heading-font">
             {event.title}
           </h1>
 
@@ -304,13 +302,13 @@ const InvitationPage = () => {
 
         <Section>
           <div className="max-w-4xl mx-auto text-center">
-            <h2 className="text-4xl font-bold text-white mb-8" style={{ fontFamily: "'Playfair Display', serif" }}>Agenda del Evento</h2>
+            <h2 className="text-4xl font-bold text-white mb-8 heading-font">Agenda del Evento</h2>
             <div className="grid md:grid-cols-2 gap-8">
               {(details.locations || []).map((loc, i) => (
                 <div key={i} className="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10 text-left">
                   <div className="flex items-center gap-4 mb-4">
                     <div className="bg-purple-500/20 p-3 rounded-lg"><MapPin className="w-6 h-6 text-purple-300" /></div>
-                    <h3 className="text-2xl font-semibold text-white">{loc.title}</h3>
+                    <h3 className="text-2xl font-semibold text-white heading-font">{loc.title}</h3>
                   </div>
                   <p className="text-gray-300 mb-1 flex items-center">
                     <Clock className="w-4 h-4 mr-2" />
@@ -336,7 +334,7 @@ const InvitationPage = () => {
         {(details.indications || []).filter(ind => ind).length > 0 && (
           <Section>
             <div className="max-w-3xl mx-auto text-center">
-              <h2 className="text-4xl font-bold text-white mb-8" style={{ fontFamily: "'Playfair Display', serif" }}>Indicaciones</h2>
+              <h2 className="text-4xl font-bold text-white mb-8 heading-font">Indicaciones</h2>
               <div className="space-y-4">
                 {(details.indications).filter(ind => ind).map((indication, i) => (
                   <div key={i} className="bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10 flex items-center gap-4">
@@ -352,7 +350,7 @@ const InvitationPage = () => {
         <Section>
           <div className="max-w-3xl mx-auto text-center bg-white/10 backdrop-blur-lg rounded-3xl p-10 border border-white/20">
             <CheckCircle className="w-12 h-12 mx-auto mb-4 text-green-400" />
-            <h2 className="text-4xl font-bold text-white mb-4" style={{ fontFamily: "'Playfair Display', serif" }}>Confirma tu Asistencia</h2>
+            <h2 className="text-4xl font-bold text-white mb-4 heading-font">Confirma tu Asistencia</h2>
             <p className="text-gray-300 mb-6">Tu respuesta es muy importante para nosotros. Por favor, confirma antes del día del evento.</p>
             <Button size="lg" className="bg-gradient-to-r from-purple-600 to-blue-600 text-white text-lg px-8 py-6 rounded-xl" onClick={() => openModal('rsvp')}><Users className="w-5 h-5 mr-2" />RSVP</Button>
           </div>
@@ -373,7 +371,7 @@ const InvitationPage = () => {
       <Dialog open={modal.isOpen} onOpenChange={(isOpen) => setModal({ ...modal, isOpen })}>
         <DialogContent className="bg-slate-800/90 backdrop-blur-sm border-purple-500 text-white">
           <DialogHeader>
-            <DialogTitle className="text-2xl">{modal.title}</DialogTitle>
+            <DialogTitle className="text-2xl heading-font">{modal.title}</DialogTitle>
           </DialogHeader>
           <div className="py-4">{modal.content}</div>
         </DialogContent>
@@ -385,7 +383,7 @@ const InvitationPage = () => {
 const ActionButton = ({ icon, title, onClick }) => (
   <motion.div whileHover={{ y: -5, scale: 1.03 }} className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 text-center cursor-pointer" onClick={onClick}>
     <div className="text-purple-300 mb-3 inline-block">{React.cloneElement(icon, { className: "w-8 h-8" })}</div>
-    <h3 className="font-semibold text-white text-lg">{title}</h3>
+    <h3 className="font-semibold text-white text-lg heading-font">{title}</h3>
   </motion.div>
 );
 

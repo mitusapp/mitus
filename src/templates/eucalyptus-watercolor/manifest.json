@@ -11,18 +11,27 @@
   },
   "defaults": {
     "fonts": { "heading": "Playfair Display", "body": "Inter" },
-    "palette": { "bg": "#ffffff", "fg": "#2a2a2a", "accent": "#5b7f68" },
+    "palette": { "bg": "#ffffff", "fg": "#605A58", "accent": "#5b7f68" },
     "overlay": "",
     "decor": {
       "topLeft":  { "x": "24px", "y": "16px", "scale": 1, "rotate": 0, "opacity": 1 },
       "topRight": { "x": "calc(100% - 24px)", "y": "16px", "scale": 1, "rotate": 0, "opacity": 0.8 },
       "bottom":   { "x": "50%", "y": "calc(100% - 24px)", "scale": 1, "rotate": 0, "opacity": 1 }
     },
+    "grain": {
+      "repeat": "repeat",
+      "size": "512px",
+      "blend": "overlay",
+      "opacity": 0.22
+    },
     "mobile": {
       "decor": {
         "topLeft":  { "x": "12px", "y": "8px", "scale": 0.9, "rotate": 0, "opacity": 1 },
         "topRight": { "x": "calc(100% - 12px)", "y": "8px", "scale": 0.9, "rotate": 0, "opacity": 0.7 },
         "bottom":   { "x": "50%", "y": "calc(100% - 12px)", "scale": 0.9, "rotate": 0, "opacity": 0.95 }
+      },
+      "grain": {
+        "size": "384px"
       }
     },
     "animation": {
