@@ -353,7 +353,9 @@ const EventGallery = () => {
       .from('uploads')
       .select(MIN_FIELDS, withCount ? { count: 'exact' } : {})
       .eq('event_id', eventId)
-      .order('uploaded_at', { ascending: false })
+      // Trae siempre por orden de nombre de archivo (asc) y desempata por fecha (asc)
+      .order('file_name', { ascending: true, nullsFirst: false })
+      .order('uploaded_at', { ascending: true })
       .range(from, to);
     if (moderated) q = q.eq('approved', true);
     const { data, error, count } = await q;
@@ -490,31 +492,21 @@ const EventGallery = () => {
     return req ? (uploads || []).filter(u => u.approved) : (uploads || []);
   }, [uploads, event?.settings?.requireModeration]);
 
-  // Normalizar categorías y ordenar globalmente por orden de categoría + nombre
-  const normalizedSorted = useMemo(() => {
-    const withCat = moderatedUploads.map(u => ({ ...u, _cat: canonicalCategory(u.category || DEFAULT_CATEGORY) }));
-    const orderIndex = (cat) => {
-      const i = CATEGORY_ORDER.indexOf(cat);
-      return i === -1 ? 9_000 : i;
-    };
-    const nameOf = (u) =>
-      (u.file_name || u.title || (u.file_url?.split('/')?.pop()?.split('?')[0]) || '')
-        .toLocaleLowerCase('es');
-    return [...withCat].sort((a, b) => {
-      const ca = orderIndex(a._cat), cb = orderIndex(b._cat);
-      if (ca !== cb) return ca - cb;
-      const n = nameOf(a).localeCompare(nameOf(b), 'es', { numeric: true, sensitivity: 'base' });
-      if (n !== 0) return n;
-      return String(a.id).localeCompare(String(b.id));
-    });
+  // Anotar categoría y preservar el orden EXACTO de llegada desde BD/paginación
+  const annotated = useMemo(() => {
+    return moderatedUploads.map((u, idx) => ({
+      ...u,
+      _seq: idx, // <- orden estable para toda la vista
+      _cat: canonicalCategory(u.category || DEFAULT_CATEGORY),
+    }));
   }, [moderatedUploads]);
+
 
   // Categorías presentes (orden respetando CATEGORY_ORDER). Usamos dataset moderado.
   const categoriesPresent = useMemo(() => {
-    const present = new Set(normalizedSorted.map(u => u._cat));
-    const ordered = CATEGORY_ORDER.filter(c => present.has(c));
-    return ordered;
-  }, [normalizedSorted]);
+    const present = new Set(annotated.map(u => u._cat));
+    return CATEGORY_ORDER.filter(c => present.has(c));
+  }, [annotated]);
 
   // Mostrar barra de categorías SOLO si hay 2 o más categorías
   const showCategoryBar = categoriesPresent.length >= 2;
@@ -526,9 +518,12 @@ const EventGallery = () => {
 
   // Items visibles según el filtro activo
   const filteredByCategory = useMemo(() => {
-    if (activeCategory === MOSTRAR_TODO || !showCategoryBar) return normalizedSorted;
-    return normalizedSorted.filter(u => u._cat === activeCategory);
-  }, [normalizedSorted, activeCategory, showCategoryBar]);
+    const base = (activeCategory === MOSTRAR_TODO || !showCategoryBar)
+      ? annotated
+      : annotated.filter(u => u._cat === activeCategory);
+    // Mantén el orden de BD con _seq
+    return [...base].sort((a, b) => a._seq - b._seq);
+  }, [annotated, activeCategory, showCategoryBar]);
 
   // Deduplicar fotos por clave base; videos siempre pasan
   const displayItems = useMemo(() => {
@@ -940,7 +935,7 @@ const EventGallery = () => {
 
 
         <footer className="text-center py-10 border-t border-black/5">
-          <p className="text-xs text-black/60">Powered by Mitus</p>
+          <p className="text-xs text-black/60">Ignacio Ramírez Fotografía +57 312 297 2356 | Powered by Mitus</p>
         </footer>
 
         {/* Modales */}

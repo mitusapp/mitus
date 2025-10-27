@@ -7,6 +7,7 @@ import { toast } from '@/components/ui/use-toast';
 
 const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onRequestSlideshow }) => {
   const [currentIndex, setCurrentIndex] = useState(startIndex);
+  const [isDark, setIsDark] = useState(false);
 
   // Swipe en móviles
   const touchStart = useRef({ x: 0, y: 0 });
@@ -69,7 +70,7 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
     return () => {
       alive = false;
       for (const [url, ctrl] of controllers) {
-        try { ctrl.abort(); } catch {}
+        try { ctrl.abort(); } catch { }
         delete abortRef.current[url];
       }
     };
@@ -79,7 +80,7 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
   useEffect(() => {
     return () => {
       for (const ctrl of Object.values(abortRef.current)) {
-        try { ctrl.abort(); } catch {}
+        try { ctrl.abort(); } catch { }
       }
       abortRef.current = {};
       preloadedRef.current.clear();
@@ -146,12 +147,17 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center no-save"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center no-save"
         onClick={onClose}
         onContextMenu={(e) => e.preventDefault()}   // ⬅️ añadido
         style={{
           // Permite tematizar el fondo del modal sin alterar el look actual
-          background: 'var(--lightbox-bg, #ffffff)',
+          background: isDark ? 'var(--lightbox-bg-dark, #000)' : 'var(--lightbox-bg, #ffffff)',
+          // Variables de tema para iconos/textos/caption
+          '--lightbox-controls-fg': isDark ? '#fff' : '#000',
+          '--lightbox-nav-icon': isDark ? '#fff' : '#000',
+          '--lightbox-caption-fg': isDark ? 'rgba(255,255,255,.85)' : 'rgba(0,0,0,.6)',
+          '--lightbox-caption-bg': isDark ? 'rgba(0,0,0,.45)' : 'rgba(255,255,255,.7)',
         }}
       >
 
@@ -226,6 +232,7 @@ const LightboxModal = ({ event, uploads, startIndex, onClose, closeBtnRef, onReq
               exit={{ opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.25 }}
               className="flex items-center justify-center"
+              onClick={() => setIsDark((v) => !v)}
             >
               {currentMedia.type === 'video'
                 ? (

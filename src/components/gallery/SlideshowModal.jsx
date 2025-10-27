@@ -115,12 +115,16 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center no-save"
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center no-save"
         onClick={onClose}
         onContextMenu={(e) => e.preventDefault()}
         style={{
-          // Permite tematizar el fondo sin alterar el look por defecto
-          background: 'var(--lightbox-bg, #ffffff)',
+          background: '#000',
+          // forzamos colores claros sobre fondo negro:
+          '--lightbox-controls-fg': '#fff',
+          '--lightbox-nav-icon': '#fff',
+          '--lightbox-caption-fg': 'rgba(255,255,255,.85)',
+          '--lightbox-caption-bg': 'rgba(0,0,0,.45)',
         }}
       >
         <div className="sr-only" aria-live="polite">
@@ -134,7 +138,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
           <Button
             variant="ghost"
             size="icon"
-            className="text-black hover:bg-black/10 rounded-full"
+            className="text-white hover:bg-white/10 rounded-full"
             onClick={(e) => { e.stopPropagation(); setIsPlaying(!isPlaying); }}
             aria-label={isPlaying ? 'Pausar presentación' : 'Reproducir presentación'}
             style={{ color: 'var(--lightbox-controls-fg, #000)' }}
@@ -145,7 +149,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
             <Button
               variant="ghost"
               size="icon"
-              className="text-black hover:bg-black/10 rounded-full"
+              className="text-white hover:bg-white/10 rounded-full"
               onClick={handleDownload}
               aria-label="Descargar archivo actual"
               style={{ color: 'var(--lightbox-controls-fg, #000)' }}
@@ -157,7 +161,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
             ref={closeBtnRef}
             variant="ghost"
             size="icon"
-            className="text-black hover:bg-black/10 rounded-full"
+            className="text-white hover:bg-white/10 rounded-full"
             onClick={(e) => { e.stopPropagation(); onClose(); }}
             aria-label="Cerrar visor"
             style={{ color: 'var(--lightbox-controls-fg, #000)' }}
@@ -175,7 +179,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
           <Button
             variant="ghost"
             size="icon"
-            className="hidden sm:inline-flex absolute left-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+            className="hidden sm:inline-flex absolute left-4 text-white bg-white/10 hover:bg-white/20 rounded-full h-12 w-12"
             onClick={goToPrev}
             aria-label="Anterior"
             style={{ color: 'var(--lightbox-nav-icon, #000)' }}
@@ -234,7 +238,7 @@ const SlideshowModal = ({ event, uploads, startIndex, onClose, closeBtnRef }) =>
           <Button
             variant="ghost"
             size="icon"
-            className="hidden sm:inline-flex absolute right-4 text-black bg-black/10 hover:bg-black/20 rounded-full h-12 w-12"
+            className="hidden sm:inline-flex absolute right-4 text-white bg-white/10 hover:bg-white/20 rounded-full h-12 w-12"
             onClick={goToNext}
             aria-label="Siguiente"
             style={{ color: 'var(--lightbox-nav-icon, #000)' }}
