@@ -18,9 +18,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 );
 
-// ⬇️ Registro global del Service Worker (solo en producción)
-if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw-mitus.js').catch(() => {});
-  });
-}
+// ⬇️ Service Worker DESACTIVADO temporalmente para evitar pantalla en blanco
+// if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+//   window.addEventListener('load', () => {
+//     navigator.serviceWorker.register('/sw-mitus.js').catch(() => {});
+//   });
+// }
