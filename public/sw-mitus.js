@@ -1,9 +1,7 @@
 // public/sw-mitus.js
-
-// Nombres de los caches (subo versión para invalidar los viejos)
-const THUMBS    = 'mitus-thumbs-v2';
-const WEB       = 'mitus-web-v2';
-const APP_SHELL = 'app-shell-v3';
+const THUMBS = 'mitus-thumbs-v1';
+const WEB    = 'mitus-web-v1';
+const APP_SHELL = 'app-shell-v2'; // ⬅️ bump para forzar index nuevo
 const MAX_THUMBS = 5000;
 const MAX_WEB    = 1500;
 
@@ -18,22 +16,22 @@ async function trimCache(cacheName, maxEntries) {
 }
 
 self.addEventListener('install', (event) => {
-  // Precarga opcional del index actual (solo para fallback offline)
+  // Precargar el "app shell" para navegación offline (siempre el index ACTUAL)
   event.waitUntil((async () => {
     try {
       const cache = await caches.open(APP_SHELL);
       const res = await fetch('/index.html', { cache: 'no-store' });
       if (res.ok) await cache.put('/index.html', res.clone());
     } catch (e) {
-      // No bloquea la instalación
+      // ignora errores de precache (no bloquea la instalación)
     }
   })());
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Purga caches viejos de app-shell u otros desconocidos
   event.waitUntil((async () => {
-    // Borrar TODOS los caches que no sean los actuales
     const keep = new Set([THUMBS, WEB, APP_SHELL]);
     const names = await caches.keys();
     await Promise.all(
@@ -47,25 +45,33 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // 1) Navegaciones: NO tocamos nada, dejamos que pase directo a red
+  // 1) Navegaciones SPA: si no hay red, servir index.html desde caché
   if (req.mode === 'navigate') {
-    return; // no event.respondWith → el SW no interfiere
+    event.respondWith((async () => {
+      try {
+        // Evita servir un index antiguo por caches intermedios
+        return await fetch(req, { cache: 'no-store' });
+      } catch {
+        const cache = await caches.open(APP_SHELL);
+        const cached = await cache.match('/index.html');
+        return cached || Response.error();
+      }
+    })());
+    return;
   }
 
-  // 2) Solo manejamos GET
+  // 2) Solo manejamos GET para recursos
   if (req.method !== 'GET') return;
 
-  // 3) Cache de imágenes: Supabase Storage y Unsplash
+  // 3) Cache de imágenes: Storage público (Supabase) y portadas Unsplash
   const isStorage = url.pathname.includes('/storage/v1/object/public/event-media/');
   const isUnsplash = url.hostname === 'images.unsplash.com';
   const isImageExt = /\.(webp|avif|jpg|jpeg|png|gif)$/i.test(url.pathname);
 
-  if (!isStorage && !(isUnsplash && isImageExt)) {
-    // Cualquier otra cosa (JS, CSS, fuentes, etc.) → no la tocamos
-    return;
-  }
+  // Si no es Storage ni (Unsplash + extensión de imagen) → no intervenimos
+  if (!isStorage && !(isUnsplash && isImageExt)) return;
 
-  // Distinguir thumbs y web solo para Storage
+  // Distinguir thumbs y web (-t.webp / -w.webp) solo para Storage (en Unsplash no aplica)
   const isThumb   = isStorage && url.pathname.endsWith('-t.webp');
   const cacheName = isThumb ? THUMBS : WEB;
   const maxEntries = isThumb ? MAX_THUMBS : MAX_WEB;
@@ -73,20 +79,22 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const cache = await caches.open(cacheName);
 
-    // Cache first
+    // 3.1 Cache first
     const cached = await cache.match(req);
     if (cached) return cached;
 
+    // 3.2 Network → cache (permite opaque para CORS)
     try {
       const resp = await fetch(req);
       if (resp && (resp.ok || resp.type === 'opaque')) {
         try {
           await cache.put(req, resp.clone());
           await trimCache(cacheName, maxEntries);
-        } catch (_) {}
+        } catch (_) { /* ignore put/trim errors */ }
       }
       return resp;
     } catch {
+      // 3.3 Sin red y no está en caché
       return Response.error();
     }
   })());
