@@ -1,15 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, User as UserIcon, ArrowLeft, Calendar, Edit3, Plus } from 'lucide-react';
+import { QrCode, Settings, Eye, Download, Users, Camera, MessageSquare, BarChart3, Copy, ExternalLink, ClipboardCheck, ArrowLeft, Calendar, Edit3, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
-import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import InviteFormModal from '@/components/invitation/InviteFormModal';
 
 // === Utilidades para portada (referencia ProfilePage) ===
 const EVENT_TYPE_LABELS = {
@@ -39,7 +37,6 @@ const getInitials = (name) => {
 const HostDashboard = () => {
   const { eventId } = useParams();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
   const [event, setEvent] = useState(null);
   const [stats, setStats] = useState({
     totalUploads: 0,
@@ -65,6 +62,12 @@ const HostDashboard = () => {
   const [newTitle, setNewTitle] = useState('');
   const [newDate, setNewDate] = useState('');
   const [creating, setCreating] = useState(false);
+  // === NUEVO: Configurar invitación (modal con vista previa) ===
+  const [inviteOpen, setInviteOpen] = useState(false);
+
+  // Abre el modal precargando el draft desde el evento
+  const openInviteConfigurator = () => setInviteOpen(true);
+
 
   const fetchPlannerSummary = useCallback(async () => {
     try {
@@ -272,11 +275,24 @@ const HostDashboard = () => {
   };
 
   // === Derivados para portada compacta (no modifica lógicas) ===
-  const hosts = Array.isArray(event?.invitation_details?.hosts) && event.invitation_details.hosts.length
-    ? event.invitation_details.hosts.join(' y ')
+  const safeParse = (s) => { try { return JSON.parse(s); } catch { return {}; } };
+  const invite = typeof event?.invitation_details === 'string'
+    ? safeParse(event.invitation_details)
+    : (event?.invitation_details || {});
+
+  const hosts = Array.isArray(invite.hosts) && invite.hosts.length
+    ? invite.hosts.join(' y ')
     : (event?.title || '');
-  const typeLabel = EVENT_TYPE_LABELS[event?.event_type] || event?.event_type_label || 'Evento';
+    
+  // Etiqueta de tipo de evento y contador de días
+  const typeLabel =
+    EVENT_TYPE_LABELS[event?.event_type] ||
+    event?.event_type_label ||
+    'Evento';
+
   const until = daysUntil(event?.date);
+
+
 
   return (
     <div className="w-full min-h-screen bg-white">
@@ -427,10 +443,21 @@ const HostDashboard = () => {
         {/* Acciones rápidas del evento */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           <ActionCard icon={<QrCode />} title="Invitación">
-            <Button onClick={() => downloadQR(invitationLink, 'invitation-qr.png', 'invitation')} className="w-full mb-2"><Download className="w-4 h-4 mr-2" />Descargar QR</Button>
-            <Button onClick={() => copyLink(invitationLink)} variant="outline" className="w-full border-[#E6E3E0]"><Copy className="w-4 h-4 mr-2" />Copiar enlace</Button>
+            <Button onClick={openInviteConfigurator} className="w-full mb-2">
+              <Edit3 className="w-4 h-4 mr-2" /> Configurar invitación
+            </Button>
+
+            <Button onClick={() => downloadQR(invitationLink, 'invitation-qr.png', 'invitation')} className="w-full mb-2">
+              <Download className="w-4 h-4 mr-2" />Descargar QR
+            </Button>
+
+            <Button onClick={() => copyLink(invitationLink)} variant="outline" className="w-full border-[#E6E3E0]">
+              <Copy className="w-4 h-4 mr-2" />Copiar enlace
+            </Button>
+
             <LinkRow label="Ver invitación" link={invitationLink} />
           </ActionCard>
+
 
           <ActionCard icon={<Eye />} title="Subir fotos y ver galería">
             {/* QR y enlace principal: LANDING DE SUBIDA */}
@@ -468,6 +495,15 @@ const HostDashboard = () => {
           </ActionCard>
         </div>
       </div>
+
+      {/* Modal: Configurar invitación (nuevo) */}
+      <InviteFormModal
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        event={event}
+        eventId={eventId}
+        onSaved={fetchEventData}
+      />
 
       {/* Modal: Nueva galería */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
